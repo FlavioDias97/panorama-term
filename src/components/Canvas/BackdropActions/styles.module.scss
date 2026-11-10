@@ -7,6 +7,11 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+
+  // à esquerda do minimapa (160px de largura, a 14px da borda)
+  &[data-beside-minimap='true'] {
+    right: 184px;
+  }
 }
 
 .toggle {

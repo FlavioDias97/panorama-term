@@ -2,6 +2,8 @@ import React from 'react';
 
 import type { BackgroundAction } from '~/domain/interfaces/plugin.interface';
 
+import { getMinimapCorner, MINIMAP_SETTINGS_EVENT } from '~/usecase/util/minimap';
+
 import styles from './styles.module.scss';
 
 /** Mensagem que a página do fundo recebe quando uma ação é escolhida. */
@@ -16,7 +18,15 @@ interface Props {
 /** Botão no canto do canvas com as ações que o fundo do tema oferece. */
 const BackdropActions = ({ frame, actions, icon }: Props): React.ReactElement => {
   const [open, setOpen] = React.useState(false);
+  const [corner, setCorner] = React.useState(getMinimapCorner);
   const root = React.useRef<HTMLDivElement>(null);
+
+  // o minimapa pode estar no mesmo canto e por cima; aí o botão fica ao lado dele
+  React.useEffect(() => {
+    const onChange = () => setCorner(getMinimapCorner());
+    window.addEventListener(MINIMAP_SETTINGS_EVENT, onChange);
+    return () => window.removeEventListener(MINIMAP_SETTINGS_EVENT, onChange);
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -39,7 +49,12 @@ const BackdropActions = ({ frame, actions, icon }: Props): React.ReactElement =>
   };
 
   return (
-    <div ref={root} className={styles.root} onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      ref={root}
+      className={styles.root}
+      data-beside-minimap={corner === 'bottom-right'}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       {open && (
         <div className={styles.menu} role="menu">
           {actions.map((a) => (
