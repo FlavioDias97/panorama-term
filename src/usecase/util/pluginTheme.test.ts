@@ -59,3 +59,33 @@ test('a background is an image inside the plugin with an optional opacity', () =
     'themes[0] background "opacity" must be 0 to 1'
   );
 });
+
+test('a background can have an interactive page with actions for its corner button', () => {
+  const actions = [
+    { id: 'ball', label: 'Throw a ball' },
+    { id: 'treat', label: 'Give a treat' }
+  ];
+  expect(parseThemes([theme({ background: { image: 'a.svg', page: 'bg/cats.html', actions, icon: '🐾' } })])).toMatchObject([
+    { background: { image: 'a.svg', opacity: 1, page: 'bg/cats.html', actions, icon: '🐾' } }
+  ]);
+  expect(parseThemes([theme({ background: { image: 'a.svg', page: 'bg/cats.html' } })])).toEqual([
+    expect.objectContaining({ background: { image: 'a.svg', opacity: 1, page: 'bg/cats.html' } })
+  ]);
+  for (const page of ['../cats.html', 'cats.js', 3]) {
+    expect(parseThemes([theme({ background: { image: 'a.svg', page } })])).toBe(
+      'themes[0] background "page" must be an .html file inside the plugin'
+    );
+  }
+  expect(parseThemes([theme({ background: { image: 'a.svg', actions } })])).toBe(
+    'themes[0] background "actions" need a "page" to receive them'
+  );
+  expect(parseThemes([theme({ background: { image: 'a.svg', page: 'p.html', actions: [{ id: 'Ball!', label: 'x' }] } })])).toBe(
+    'themes[0] background actions[0] needs an "id" (lowercase letters, digits and dashes) and a "label"'
+  );
+  expect(parseThemes([theme({ background: { image: 'a.svg', page: 'p.html', actions: [actions[0], actions[0]] } })])).toBe(
+    'themes[0] background actions[1] repeats the id "ball"'
+  );
+  expect(parseThemes([theme({ background: { image: 'a.svg', page: 'p.html', icon: 'too long' } })])).toBe(
+    'themes[0] background "icon" must be a short text'
+  );
+});

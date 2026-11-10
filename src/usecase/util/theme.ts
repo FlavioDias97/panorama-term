@@ -1,4 +1,11 @@
-import type { PluginChoice, PluginManifest, PluginTheme, ThemeKind } from '~/domain/interfaces/plugin.interface';
+import type {
+  BackgroundAction,
+  PluginBackground,
+  PluginChoice,
+  PluginManifest,
+  PluginTheme,
+  ThemeKind
+} from '~/domain/interfaces/plugin.interface';
 
 import { readFileBytes } from '~/adapter/fs/fs.client';
 import { getSetting, setSetting } from '~/adapter/settings/settings.client';
@@ -94,31 +101,65 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 export interface Backdrop {
-  url: string;
+  /** Imagem do fundo (URL de blob), quando o tema não tem página. */
+  url: string | null;
+  /** HTML da página interativa, que roda num iframe isolado. */
+  page: string | null;
   opacity: number;
+  actions: BackgroundAction[];
+  icon: string;
 }
 
 let backdrop: Backdrop | null = null;
 let backdropKey = '';
+let backdropTicket = 0;
 
 export const getBackdrop = (): Backdrop | null => backdrop;
 
-const showBackdrop = async (pluginId: string | null, background: PluginTheme['background']): Promise<void> => {
-  const key = pluginId && background ? `${pluginId}/${background.image}|${background.opacity}` : '';
-  if (key === backdropKey) return;
-  backdropKey = key;
-  if (backdrop) URL.revokeObjectURL(backdrop.url);
-  backdrop = null;
-  if (pluginId && background) {
+/** Assinatura curta dos bytes, para saber se o arquivo mudou sem guardar uma cópia. */
+const fingerprint = (bytes: Uint8Array): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 0x01000193);
+  return `${bytes.length}:${h >>> 0}`;
+};
+
+const loadBackdrop = async (dir: string, background: PluginBackground): Promise<[string, Backdrop] | null> => {
+  const base = { opacity: background.opacity, actions: background.actions ?? [], icon: background.icon ?? '✦' };
+  if (background.page) {
     try {
-      const bytes = await readFileBytes(`${getPluginsState().root}/${pluginId}/${background.image}`);
-      if (backdropKey !== key) return;
-      const type = IMAGE_TYPES[background.image.split('.').pop()!.toLowerCase()];
-      backdrop = { url: URL.createObjectURL(new Blob([bytes], { type })), opacity: background.opacity };
+      const bytes = new Uint8Array(await readFileBytes(`${dir}/${background.page}`));
+      const key = `page|${JSON.stringify(background)}|${fingerprint(bytes)}`;
+      return [key, { ...base, url: null, page: new TextDecoder().decode(bytes) }];
     } catch {
-      return;
+      // sem a página, mostra a imagem
     }
   }
+  const bytes = new Uint8Array(await readFileBytes(`${dir}/${background.image}`));
+  const key = `image|${JSON.stringify(background)}|${fingerprint(bytes)}`;
+  if (key === backdropKey) return [key, backdrop!];
+  const type = IMAGE_TYPES[background.image.split('.').pop()!.toLowerCase()];
+  return [key, { ...base, actions: [], url: URL.createObjectURL(new Blob([bytes], { type })), page: null }];
+};
+
+/** Lê o fundo do tema de novo e só troca se o arquivo ou o manifesto mudaram. */
+const showBackdrop = async (pluginId: string | null, background: PluginTheme['background']): Promise<void> => {
+  const ticket = ++backdropTicket;
+  let loaded: [string, Backdrop] | null = null;
+  if (pluginId && background) {
+    try {
+      loaded = await loadBackdrop(`${getPluginsState().root}/${pluginId}`, background);
+    } catch {
+      loaded = null;
+    }
+  }
+  const [key, next] = loaded ?? ['', null];
+  if (ticket !== backdropTicket || key === backdropKey) {
+    if (next?.url && next !== backdrop) URL.revokeObjectURL(next.url);
+    return;
+  }
+  if (backdrop?.url) URL.revokeObjectURL(backdrop.url);
+  backdropKey = key;
+  backdrop = next;
   window.dispatchEvent(new Event(THEME_EVENT));
 };
 
@@ -136,10 +177,10 @@ export const applyTheme = (pref: ThemePref): void => {
   const resolved = resolveTheme(pref);
   const choice = savedChoice(resolved);
   const theme = findTheme(enabledPlugins(), choice, resolved);
+  void showBackdrop(theme ? choice.split(':')[0] : null, theme?.background);
   const signature = JSON.stringify([resolved, theme]);
   if (signature === applied) return;
   applied = signature;
-  void showBackdrop(theme ? choice.split(':')[0] : null, theme?.background);
 
   const p = resolved === 'light' ? LIGHT : DARK;
   document.documentElement.dataset.theme = resolved;

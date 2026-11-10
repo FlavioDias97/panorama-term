@@ -8,6 +8,7 @@ import { readClipboard, writeClipboard } from '~/adapter/clipboard/clipboard.cli
 import Frame from '~/components/Canvas/Frame';
 import Toasts from '~/components/commons/Toasts';
 import FrameBar from '~/components/Canvas/FrameBar';
+import BackdropActions from '~/components/Canvas/BackdropActions';
 import Minimap from '~/components/Canvas/Minimap';
 import CommandBar from '~/components/Canvas/CommandBar';
 import SplitHandle from '~/components/Canvas/SplitHandle';
@@ -149,6 +150,7 @@ const Canvas = () => {
   const [fsExit, setFsExit] = React.useState(false);
   const [navOpen, setNavOpen] = React.useState(() => getPref('panorama:navOpen') === '1');
   const backdrop = useBackdrop();
+  const backdropFrame = React.useRef<HTMLIFrameElement>(null);
   const [navWidth, setNavWidth] = React.useState(0);
   const [fsSplit, setFsSplit] = React.useState(savedSplit);
   const [commandBarOpen, setCommandBarOpen] = React.useState(false);
@@ -791,7 +793,18 @@ const Canvas = () => {
         onPointerCancel={endPan}
         onPointerDownCapture={onBgPointerDownCapture}
       >
-        {backdrop && !fsId && (
+        {backdrop && !fsId && backdrop.page !== null && (
+          <iframe
+            ref={backdropFrame}
+            title=""
+            tabIndex={-1}
+            sandbox="allow-scripts"
+            srcDoc={backdrop.page}
+            className={styles.backdrop}
+            style={{ opacity: backdrop.opacity }}
+          />
+        )}
+        {backdrop && !fsId && backdrop.url !== null && (
           <img alt="" draggable={false} src={backdrop.url} className={styles.backdrop} style={{ opacity: backdrop.opacity }} />
         )}
         <canvas ref={gridRef} className={styles.grid} />
@@ -941,6 +954,9 @@ const Canvas = () => {
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
+        {backdrop && !fsId && backdrop.page !== null && backdrop.actions.length > 0 && (
+          <BackdropActions frame={backdropFrame} actions={backdrop.actions} icon={backdrop.icon} />
+        )}
         {!fsId && (
           <Minimap view={view} tiles={tiles} agents={agents} alerts={alertKinds} viewportRef={bgRef} onPan={panTo} />
         )}

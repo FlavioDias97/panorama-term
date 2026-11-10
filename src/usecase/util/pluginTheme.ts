@@ -1,4 +1,4 @@
-import type { PluginTheme } from '~/domain/interfaces/plugin.interface';
+import type { BackgroundAction, PluginTheme } from '~/domain/interfaces/plugin.interface';
 
 import { isInside, isRecord, isText } from '~/usecase/util/pluginFields';
 
@@ -54,6 +54,8 @@ const RANGES: Record<string, [number, number, string]> = {
 };
 
 const IMAGE = /\.(svg|png|gif|webp|avif|jpe?g)$/i;
+const PAGE = /\.html?$/i;
+const MAX_ACTIONS = 8;
 
 const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const KNOWN = new Set(THEME_COLORS);
@@ -87,15 +89,37 @@ const parseTerminal = (value: unknown, where: string): PluginTheme['terminal'] |
   return { foreground, cursor, ansi } as PluginTheme['terminal'];
 };
 
+const parseActions = (value: unknown, where: string): BackgroundAction[] | string | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_ACTIONS)
+    return `${where} background "actions" must be a list of up to ${MAX_ACTIONS}`;
+  const actions: BackgroundAction[] = [];
+  for (const [index, action] of value.entries()) {
+    if (!isRecord(action) || !isText(action.id) || !ID.test(action.id) || !isText(action.label)) {
+      return `${where} background actions[${index}] needs an "id" (lowercase letters, digits and dashes) and a "label"`;
+    }
+    if (actions.some((a) => a.id === action.id)) return `${where} background actions[${index}] repeats the id "${action.id}"`;
+    actions.push({ id: action.id, label: action.label });
+  }
+  return actions;
+};
+
 const parseBackground = (value: unknown, where: string): PluginTheme['background'] | string => {
   if (value === undefined) return undefined;
   if (!isRecord(value)) return `${where} "background" must be an object`;
-  const { image, opacity = 1 } = value;
+  const { image, opacity = 1, page, icon } = value;
   if (typeof image !== 'string' || !isInside(image) || !IMAGE.test(image)) {
     return `${where} background "image" must be an image file inside the plugin`;
   }
   if (typeof opacity !== 'number' || opacity < 0 || opacity > 1) return `${where} background "opacity" must be 0 to 1`;
-  return { image, opacity };
+  if (page !== undefined && (typeof page !== 'string' || !isInside(page) || !PAGE.test(page))) {
+    return `${where} background "page" must be an .html file inside the plugin`;
+  }
+  if (icon !== undefined && !(isText(icon) && [...icon].length <= 4)) return `${where} background "icon" must be a short text`;
+  const actions = parseActions(value.actions, where);
+  if (typeof actions === 'string') return actions;
+  if (actions?.length && !page) return `${where} background "actions" need a "page" to receive them`;
+  return { image, opacity, ...(page && { page }), ...(actions?.length && { actions }), ...(icon && { icon }) };
 };
 
 const parseTheme = (value: unknown, index: number): PluginTheme | string => {

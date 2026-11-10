@@ -16,7 +16,22 @@ export interface PluginTheme {
   kind: ThemeKind;
   colors: Record<string, string>;
   terminal: { foreground?: string; cursor?: string; ansi?: string[] };
-  background?: { image: string; opacity: number };
+  background?: PluginBackground;
+}
+
+export interface BackgroundAction {
+  id: string;
+  label: string;
+}
+
+export interface PluginBackground {
+  image: string;
+  opacity: number;
+  /** Página HTML que roda num iframe isolado no lugar da imagem e recebe as ações. */
+  page?: string;
+  /** Viram um botão no canto do canvas; cada clique manda a ação para a página. */
+  actions?: BackgroundAction[];
+  icon?: string;
 }
 
 export type FontUse = 'ui' | 'code' | 'terminal';

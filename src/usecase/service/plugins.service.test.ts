@@ -251,3 +251,40 @@ test('a theme background is read from the plugin and goes away with the theme', 
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(getBackdrop()).toBeNull();
 });
+
+test('a theme background page is read as HTML, with its actions, and reloads when the file changes', async () => {
+  const { initPlugins, setThemePref, setThemeChoice, getBackdrop } = await load();
+  const background = { image: 'bg/cats.svg', page: 'bg/cats.html', opacity: 0.8, actions: [{ id: 'ball', label: 'Ball' }] };
+  const cats = {
+    id: 'cats',
+    name: 'Cats',
+    version: '1.0.0',
+    contributes: { themes: [{ id: 'night', label: 'Cats Dark', kind: 'dark', background }] }
+  };
+  manifests = { cats: JSON.stringify(cats) };
+  const html = (body: string) => new TextEncoder().encode(`<!doctype html><p>${body}</p>`).buffer;
+  files.set('/plugins/cats/bg/cats.svg', new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer);
+  files.set('/plugins/cats/bg/cats.html', html('miau'));
+  await initPlugins();
+  setThemePref('dark');
+  setThemeChoice('dark', 'cats:night');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(getBackdrop()).toMatchObject({ url: null, page: '<!doctype html><p>miau</p>', opacity: 0.8, icon: '✦' });
+  expect(getBackdrop()?.actions).toEqual([{ id: 'ball', label: 'Ball' }]);
+
+  const before = getBackdrop();
+  await initPlugins();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(getBackdrop()).toBe(before);
+
+  files.set('/plugins/cats/bg/cats.html', html('miau miau'));
+  await initPlugins();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(getBackdrop()?.page).toBe('<!doctype html><p>miau miau</p>');
+
+  files.delete('/plugins/cats/bg/cats.html');
+  await initPlugins();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(getBackdrop()).toMatchObject({ page: null, actions: [] });
+  expect(getBackdrop()?.url).toStartWith('blob:');
+});

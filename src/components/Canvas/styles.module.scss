@@ -48,6 +48,10 @@
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+  border: 0;
+  // a página de fundo (iframe) só fica transparente se o color-scheme bater com o dela
+  color-scheme: normal;
+  background: transparent;
 
   @media (prefers-reduced-motion: reduce) {
     display: none;
