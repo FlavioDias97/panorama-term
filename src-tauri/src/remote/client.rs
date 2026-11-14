@@ -15,7 +15,10 @@ pub struct Identity {
     host_key: [u8; 32],
     addresses: Vec<String>,
     pub device_id: String,
+    #[serde(default = "default_host_name")]
+    pub host_name: String,
 }
+fn default_host_name() -> String { "Remote host".into() }
 impl Identity {
     pub fn save(&self) -> Result<(), String> {
         let dir = crate::store::base_dir()?;
@@ -25,6 +28,10 @@ impl Identity {
     pub fn load() -> Result<Self, String> {
         let path = crate::store::base_dir()?.join("remote-identity.json");
         serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+    pub fn forget() -> Result<(), String> {
+        let path = crate::store::base_dir()?.join("remote-identity.json");
+        match std::fs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
     }
     fn save_to(&self, path: &Path) -> Result<(), String> {
         use std::io::Write;
@@ -98,7 +105,8 @@ pub(super) async fn handshake(identity: &Identity, intro: Value) -> Result<(Sock
 }
 pub async fn pair(uri: &str, name: &str) -> Result<Identity, String> {
     let (addresses, host_key, code) = parse_uri(uri)?;
-    let mut identity = Identity { secret: random()?, host_key, addresses, device_id: String::new() };
+    let host_name = url::Url::parse(uri).ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "n").map(|(_, v)| v.into_owned())).filter(|n| !n.is_empty()).unwrap_or_else(default_host_name);
+    let mut identity = Identity { secret: random()?, host_key, addresses, device_id: String::new(), host_name };
     let (_, _, welcome) = handshake(&identity, json!({"t":"pair","code":code,"name":name,"capability":"desktop"})).await?;
     identity.device_id = welcome["deviceId"].as_str().ok_or("Missing device ID")?.to_owned();
     identity.save()?;
@@ -174,10 +182,13 @@ mod tests {
     }
     #[test] fn identity_is_private_and_roundtrips() {
         let path = std::env::temp_dir().join(format!("panorama-identity-{}", std::process::id()));
-        let identity = Identity { secret: [1; 32], host_key: [2; 32], addresses: vec!["127.0.0.1:1".into()], device_id: "id".into() };
+        let identity = Identity { secret: [1; 32], host_key: [2; 32], addresses: vec!["127.0.0.1:1".into()], device_id: "id".into(), host_name: "Host".into() };
         identity.save_to(&path).unwrap();
         let restored: Identity = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(restored.secret, identity.secret); assert_eq!(restored.host_key, identity.host_key);
+        assert_eq!(restored.secret, identity.secret); assert_eq!(restored.host_key, identity.host_key); assert_eq!(restored.host_name, "Host");
+        let mut old = serde_json::to_value(&identity).unwrap();
+        old.as_object_mut().unwrap().remove("host_name");
+        assert_eq!(serde_json::from_value::<Identity>(old).unwrap().host_name, "Remote host");
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600); }
         std::fs::remove_file(path).unwrap();
     }

@@ -10,15 +10,14 @@ const request = async <T>(path: string, method = 'GET'): Promise<T> => {
 
 export const fetchMobileState = (): Promise<MobileState> => request<MobileState>('state');
 
-export const startMobilePairing = (): Promise<MobilePairing> => request<MobilePairing>('pair', 'POST');
+export const startMobilePairing = (desktop = false): Promise<MobilePairing> =>
+  request<MobilePairing>(`pair${desktop ? '?desktop=1' : ''}`, 'POST');
 
 export const cancelMobilePairing = (): Promise<MobileState> => request<MobileState>('cancel', 'POST');
 
-export const setMobileEnabled = (on: boolean): Promise<MobileState> =>
-  request<MobileState>(`enable?on=${on ? 1 : 0}`, 'POST');
+export const setMobileEnabled = (on: boolean): Promise<MobileState> => request<MobileState>(`enable?on=${on ? 1 : 0}`, 'POST');
 
-export const setMobileRemote = (on: boolean): Promise<MobileState> =>
-  request<MobileState>(`remote?on=${on ? 1 : 0}`, 'POST');
+export const setMobileRemote = (on: boolean): Promise<MobileState> => request<MobileState>(`remote?on=${on ? 1 : 0}`, 'POST');
 
 export const revokeMobileDevice = (id: string): Promise<MobileState> =>
   request<MobileState>(`revoke?id=${encodeURIComponent(id)}`, 'POST');

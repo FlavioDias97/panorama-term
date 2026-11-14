@@ -8,6 +8,9 @@ export let LOCAL_SIDECAR_HTTP = '';
 let localEndpoint = '';
 let currentEndpoint = '';
 
+export const isRemoteReconnect = (current: string, next: string, local: string): boolean =>
+  !!current && !!local && current !== local && next !== local && current !== next;
+
 const setEndpoint = (endpoint: string): void => {
   currentEndpoint = endpoint;
   if (localEndpoint) setRemote(endpoint !== localEndpoint);
@@ -24,7 +27,9 @@ export const initSidecar = async (
   let changes = 0;
   await onEndpoint((endpoint) => {
     changes++;
+    const reconnect = isRemoteReconnect(currentEndpoint, endpoint, localEndpoint);
     setEndpoint(endpoint);
+    if (reconnect) location.reload();
   });
   const [endpoint, local] = await Promise.all([getEndpoint(), getLocalEndpoint()]);
   localEndpoint = local;

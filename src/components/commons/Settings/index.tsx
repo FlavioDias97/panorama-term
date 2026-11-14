@@ -1,6 +1,17 @@
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { X, Bot, Puzzle, Palette, Keyboard, RotateCcw, Smartphone, SquareTerminal, SlidersHorizontal } from 'lucide-react';
+import {
+  X,
+  Bot,
+  Puzzle,
+  Palette,
+  Keyboard,
+  RotateCcw,
+  Smartphone,
+  SquareTerminal,
+  SlidersHorizontal,
+  Monitor
+} from 'lucide-react';
 
 import { getSetting, setSetting } from '~/adapter/settings/settings.client';
 import { SETTINGS_SECTIONS, type SettingsSection } from '~/usecase/util/settingsNav';
@@ -10,14 +21,7 @@ import type { FontUse, PluginChoice, ThemeKind } from '~/domain/interfaces/plugi
 import { usePlugins } from '~/usecase/hooks/usePlugins';
 import { enabledManifests } from '~/usecase/util/plugins';
 import { fontChoices, getFontChoice, setFontChoice } from '~/usecase/util/fonts';
-import {
-  themeChoices,
-  getThemePref,
-  setThemePref,
-  getThemeChoice,
-  setThemeChoice,
-  type ThemePref
-} from '~/usecase/util/theme';
+import { themeChoices, getThemePref, setThemePref, getThemeChoice, setThemeChoice, type ThemePref } from '~/usecase/util/theme';
 import { listTerminalTargets, TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { setHeaderPart, getHeaderParts, HEADER_PART_OPTIONS, type HeaderPart } from '~/usecase/util/headerParts';
 import {
@@ -49,6 +53,7 @@ import {
 
 import ToggleOption from './ToggleOption';
 import MobileSection from './MobileSection';
+import RemoteSection from './RemoteSection';
 import PluginsSection from './PluginsSection';
 import styles from './styles.module.scss';
 
@@ -71,11 +76,7 @@ interface RadioOptionProps {
 }
 
 const RadioOption = ({ label, description, selected, onSelect }: RadioOptionProps) => (
-  <button
-    type="button"
-    onClick={onSelect}
-    className={`${styles.option} ${selected ? styles.selected : ''}`}
-  >
+  <button type="button" onClick={onSelect} className={`${styles.option} ${selected ? styles.selected : ''}`}>
     <span className={styles.radio}>{selected && <span className={styles.dot} />}</span>
     <span className={styles.optionText}>
       <span className={styles.optionLabel}>{label}</span>
@@ -155,10 +156,7 @@ const ShortcutRow = ({ id, label, defaultCombo }: ShortcutRowProps) => {
             <RotateCcw size={13} strokeWidth={2} />
           </button>
         )}
-        <button
-          onClick={startListening}
-          className={`${styles.shortcutCombo} ${listening ? styles.listening : ''}`}
-        >
+        <button onClick={startListening} className={`${styles.shortcutCombo} ${listening ? styles.listening : ''}`}>
           {listening ? 'Press keys...' : formatCombo(combo)}
         </button>
       </div>
@@ -172,6 +170,7 @@ const SECTION_ICONS: Record<SettingsSection, LucideIcon> = {
   terminal: SquareTerminal,
   agentBar: Bot,
   mobile: Smartphone,
+  remote: Monitor,
   plugins: Puzzle,
   shortcuts: Keyboard
 };
@@ -227,7 +226,9 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
   }));
 
   React.useEffect(() => {
-    void listMonitors().then(setMonitors).catch(() => {});
+    void listMonitors()
+      .then(setMonitors)
+      .catch(() => {});
   }, []);
 
   React.useEffect(() => {
@@ -356,13 +357,7 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
               <div className={styles.group}>
                 <div className={styles.sliderHead}>
                   <p className={styles.groupLabel}>Frame fit padding</p>
-                  <input
-                    min={0}
-                    type="number"
-                    value={framePad}
-                    onChange={changeFramePad}
-                    className={styles.numberInput}
-                  />
+                  <input min={0} type="number" value={framePad} onChange={changeFramePad} className={styles.numberInput} />
                 </div>
                 <p className={styles.hint}>Space in px kept around tiles when fitting a frame to its contents.</p>
               </div>
@@ -446,9 +441,7 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
                       key={id}
                       label={label}
                       selected={target === id}
-                      description={
-                        isDefault ? 'Recommended default for this platform.' : 'Available for new terminals.'
-                      }
+                      description={isDefault ? 'Recommended default for this platform.' : 'Available for new terminals.'}
                       onSelect={() => selectTarget(id)}
                     />
                   ))}
@@ -496,6 +489,7 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
             </div>
           )}
           {section === 'mobile' && <MobileSection />}
+          {section === 'remote' && <RemoteSection />}
           {section === 'plugins' && <PluginsSection />}
           {section === 'appearance' && (
             <div className={styles.pane}>

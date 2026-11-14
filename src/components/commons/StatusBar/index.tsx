@@ -11,6 +11,9 @@ import UsageSegment from '~/components/commons/StatusBar/UsageSegment';
 import { getSetting, setSetting } from '~/adapter/settings/settings.client';
 import { PROVIDER_NAMES } from '~/components/commons/StatusBar/constants';
 import { USAGE_PROVIDERS, STATUS_BAR_USAGE_KEY } from '~/usecase/util/constants';
+import { useRemoteStatus } from '~/usecase/hooks/useRemoteStatus';
+import { remoteLabel } from '~/usecase/util/remote';
+import { requestSettings } from '~/usecase/util/settingsNav';
 
 import styles from './styles.module.scss';
 
@@ -18,6 +21,7 @@ const StatusBar = () => {
   const [enabled, setEnabled] = React.useState(() => getSetting<UsageProvider[]>(STATUS_BAR_USAGE_KEY, USAGE_PROVIDERS));
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   const { usage, loading, refresh } = useAgentUsage(enabled);
+  const remote = useRemoteStatus();
 
   const toggle = (provider: UsageProvider) => {
     const next = enabled.includes(provider) ? enabled.filter((p) => p !== provider) : [...enabled, provider];
@@ -42,6 +46,11 @@ const StatusBar = () => {
 
   return (
     <footer className={styles.root} onContextMenu={openMenu}>
+      {remote && remote.status !== 'disconnected' && (
+        <button className={styles.add} onClick={() => requestSettings('remote')}>
+          {remoteLabel(remote)}
+        </button>
+      )}
       {shown.map((u) => (
         <UsageSegment usage={u} key={u.provider} />
       ))}
