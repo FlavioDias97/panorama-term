@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::sync::atomic::{AtomicU64, Ordering};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
+use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 struct Provider {
     generation: u64,
@@ -19,8 +19,17 @@ static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SECRET: OnceLock<String> = OnceLock::new();
 static EVENTS: OnceLock<broadcast::Sender<Value>> = OnceLock::new();
-fn state() -> &'static Mutex<State> { STATE.get_or_init(|| Mutex::new(State { provider: None, pending: HashMap::new() })) }
-fn events() -> &'static broadcast::Sender<Value> { EVENTS.get_or_init(|| broadcast::channel(256).0) }
+fn state() -> &'static Mutex<State> {
+    STATE.get_or_init(|| {
+        Mutex::new(State {
+            provider: None,
+            pending: HashMap::new(),
+        })
+    })
+}
+fn events() -> &'static broadcast::Sender<Value> {
+    EVENTS.get_or_init(|| broadcast::channel(256).0)
+}
 
 pub fn init() -> Result<(), String> {
     let mut bytes = [0u8; 32];
@@ -31,21 +40,42 @@ pub fn init() -> Result<(), String> {
     let path = dir.join("host-service-secret");
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
-    #[cfg(unix)] {
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         opts.mode(0o600);
         // Also fix permissions if the file already exists.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .or_else(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+            .map_err(|e| e.to_string())?;
     }
     use std::io::Write;
-    opts.open(path).and_then(|mut f| f.write_all(secret.as_bytes())).map_err(|e| e.to_string())?;
-    SECRET.set(secret).map_err(|_| "secret already initialized".to_string())
+    opts.open(path)
+        .and_then(|mut f| f.write_all(secret.as_bytes()))
+        .map_err(|e| e.to_string())?;
+    SECRET
+        .set(secret)
+        .map_err(|_| "secret already initialized".to_string())
 }
 
 pub fn authorized(headers: &HashMap<String, String>) -> bool {
     headers.get("origin").is_none()
-        && headers.get("host").map(|h| h == &format!("127.0.0.1:{}", crate::port())).unwrap_or(false)
-        && headers.get("authorization").and_then(|h| h.strip_prefix("Bearer ")).zip(SECRET.get()).map(|(a,b)| a == b).unwrap_or(false)
+        && headers
+            .get("host")
+            .map(|h| h == &format!("127.0.0.1:{}", crate::port()))
+            .unwrap_or(false)
+        && headers
+            .get("authorization")
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .zip(SECRET.get())
+            .map(|(a, b)| a == b)
+            .unwrap_or(false)
 }
 
 fn replace(tx: mpsc::Sender<Value>) -> u64 {
@@ -53,6 +83,7 @@ fn replace(tx: mpsc::Sender<Value>) -> u64 {
     let mut state = state().lock().unwrap();
     state.pending.clear();
     state.provider = Some(Provider { generation, tx });
+    let _ = events().send(json!({"event":"resync"}));
     generation
 }
 fn disconnect(generation: u64) {
@@ -60,6 +91,7 @@ fn disconnect(generation: u64) {
     if state.provider.as_ref().map(|p| p.generation) == Some(generation) {
         state.provider = None;
         state.pending.clear();
+        let _ = events().send(json!({"event":"resync"}));
     }
 }
 
@@ -69,24 +101,38 @@ pub async fn call(command: &str, args: Value) -> Result<Value, String> {
     call_with_timeout(command, args, std::time::Duration::from_secs(60)).await
 }
 
-async fn call_with_timeout(command: &str, args: Value, timeout: std::time::Duration) -> Result<Value, String> {
+async fn call_with_timeout(
+    command: &str,
+    args: Value,
+    timeout: std::time::Duration,
+) -> Result<Value, String> {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (reply, rx) = oneshot::channel();
     let tx = {
         let mut state = state().lock().unwrap();
-        let tx = state.provider.as_ref().ok_or("Host app unavailable")?.tx.clone();
+        let tx = state
+            .provider
+            .as_ref()
+            .ok_or("Host app unavailable")?
+            .tx
+            .clone();
         state.pending.insert(id, reply);
         tx
     };
     let result = tokio::time::timeout(timeout, async {
-        tx.send(json!({"id": id, "command": command, "args": args})).await.map_err(|_| "Host app unavailable".to_string())?;
+        tx.send(json!({"id": id, "command": command, "args": args}))
+            .await
+            .map_err(|_| "Host app unavailable".to_string())?;
         rx.await.map_err(|_| "Host app unavailable".to_string())?
-    }).await;
+    })
+    .await;
     state().lock().unwrap().pending.remove(&id);
     result.map_err(|_| "Host service request timed out".to_string())?
 }
 #[allow(dead_code)]
-pub fn subscribe() -> broadcast::Receiver<Value> { events().subscribe() }
+pub fn subscribe() -> broadcast::Receiver<Value> {
+    events().subscribe()
+}
 
 pub async fn serve(ws: WebSocketStream<TcpStream>) {
     let (mut sink, mut stream) = ws.split();
@@ -142,7 +188,10 @@ mod tests {
     }
     #[tokio::test]
     async fn unavailable_and_replacement() {
-        assert_eq!(call("store_read", json!({})).await.unwrap_err(), "Host app unavailable");
+        assert_eq!(
+            call("store_read", json!({})).await.unwrap_err(),
+            "Host app unavailable"
+        );
         let (tx, _rx) = mpsc::channel(1);
         let old = replace(tx);
         let (tx, _rx) = mpsc::channel(1);
@@ -150,31 +199,62 @@ mod tests {
         disconnect(old);
         assert!(state().lock().unwrap().provider.is_some());
         disconnect(new);
-        assert_eq!(call("store_read", json!({})).await.unwrap_err(), "Host app unavailable");
+        assert_eq!(
+            call("store_read", json!({})).await.unwrap_err(),
+            "Host app unavailable"
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             serve(tokio_tungstenite::accept_async(socket).await.unwrap()).await;
         });
-        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}")).await.unwrap();
-        while state().lock().unwrap().provider.is_none() { tokio::task::yield_now().await; }
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        while state().lock().unwrap().provider.is_none() {
+            tokio::task::yield_now().await;
+        }
         let mut subscription = subscribe();
-        client.send(Message::Text(json!({"event":"note:changed","payload":{"content":"hello"}}).to_string())).await.unwrap();
+        client
+            .send(Message::Text(
+                json!({"event":"note:changed","payload":{"content":"hello"}}).to_string(),
+            ))
+            .await
+            .unwrap();
         assert_eq!(subscription.recv().await.unwrap()["event"], "note:changed");
         let request = tokio::spawn(async { call("store_read", json!({"name":"test"})).await });
-        let Message::Text(raw) = client.next().await.unwrap().unwrap() else { panic!("expected request") };
+        let Message::Text(raw) = client.next().await.unwrap().unwrap() else {
+            panic!("expected request")
+        };
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["command"], "store_read");
-        client.send(Message::Text(json!({"id":v["id"],"result":[0,255]}).to_string())).await.unwrap();
-        assert_eq!(request.await.unwrap().unwrap(), json!([0,255]));
+        client
+            .send(Message::Text(
+                json!({"id":v["id"],"result":[0,255]}).to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(request.await.unwrap().unwrap(), json!([0, 255]));
         client.close(None).await.unwrap();
         server.await.unwrap();
-        assert_eq!(call("store_read", json!({})).await.unwrap_err(), "Host app unavailable");
+        assert_eq!(
+            call("store_read", json!({})).await.unwrap_err(),
+            "Host app unavailable"
+        );
         let (tx, _rx) = mpsc::channel(1);
         tx.send(json!({})).await.unwrap();
         let generation = replace(tx);
-        assert_eq!(call_with_timeout("store_read", json!({}), std::time::Duration::from_millis(10)).await.unwrap_err(), "Host service request timed out");
+        assert_eq!(
+            call_with_timeout(
+                "store_read",
+                json!({}),
+                std::time::Duration::from_millis(10)
+            )
+            .await
+            .unwrap_err(),
+            "Host service request timed out"
+        );
         assert!(state().lock().unwrap().pending.is_empty());
         disconnect(generation);
     }

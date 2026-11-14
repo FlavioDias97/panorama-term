@@ -30,10 +30,7 @@ test('concurrent tab save and tab switch keep both writes and never cross tabs',
   const tile = { id: 't1', type: 'note', x: 0, y: 0, width: 10, height: 10, zIndex: 1 };
   const state = { version: 1, tiles: [tile], viewport: { zoom: 1, centerX: 0, centerY: 0 } };
 
-  await Promise.all([
-    workspaceService.saveTabState(wsId, tab1!, state as never),
-    workspaceService.setActiveTab(wsId, tab2.id)
-  ]);
+  await Promise.all([workspaceService.saveTabState(wsId, tab1!, state as never), workspaceService.setActiveTab(wsId, tab2.id)]);
 
   expect((await workspaceService.getTabs(wsId)).activeTabId).toBe(tab2.id);
   expect((await workspaceService.loadTabState(wsId, tab1!))!.tiles).toHaveLength(1);
@@ -49,4 +46,14 @@ test('invalidating a changed workspace reloads the new snapshot', async () => {
   expect((await workspaceService.list()).workspaces[0]!.name).not.toBe('Changed remotely');
   await workspaceService.invalidate([key]);
   expect((await workspaceService.list()).workspaces[0]!.name).toBe('Changed remotely');
+});
+
+test('resync invalidates every cached workspace', async () => {
+  const { activeId } = await workspaceService.list();
+  const key = `workspaces/${activeId}.json`;
+  const file = clone(db.get(key)) as { meta: { name: string } };
+  file.meta.name = 'After resync';
+  db.set(key, file);
+  await workspaceService.invalidate(['*']);
+  expect((await workspaceService.list()).workspaces[0]!.name).toBe('After resync');
 });

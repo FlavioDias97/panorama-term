@@ -15,9 +15,10 @@ test('coalesces changes during interaction and applies them on release', () => {
   sync.change('workspaces/a.json');
   sync.change('workspaces/a.json');
   sync.change('workspaces.json');
+  sync.change('*');
   expect(calls).toEqual([]);
   sync.end();
-  expect(calls).toEqual([['workspaces/a.json', 'workspaces.json']]);
+  expect(calls).toEqual([['workspaces/a.json', 'workspaces.json', '*']]);
   sync.end();
   expect(calls).toHaveLength(1);
 });

@@ -17,9 +17,17 @@ export const createDeferredReload = (reload: (names: string[]) => void) => {
     reload(names);
   };
   return {
-    start: () => { down = true; },
-    end: () => { down = false; flush(); },
-    change: (name: string) => { pending.add(name); flush(); }
+    start: () => {
+      down = true;
+    },
+    end: () => {
+      down = false;
+      flush();
+    },
+    change: (name: string) => {
+      pending.add(name);
+      flush();
+    }
   };
 };
 

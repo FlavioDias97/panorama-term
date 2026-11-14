@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub mod remote;
 pub mod service_bridge;
@@ -72,90 +72,7 @@ fn host_port() -> u16 {
     configured_port(std::env::var("PANORAMA_HOST_PORT").ok().as_deref(), HOST_PORT)
 }
 
-struct RemoteState { proxy: remote::Proxy, session: std::sync::Arc<tokio::sync::Mutex<remote::Session>>, events: tauri::async_runtime::JoinHandle<()>, status: std::sync::Arc<std::sync::Mutex<String>>, host_name: String }
-impl Drop for RemoteState { fn drop(&mut self) { self.events.abort(); } }
-static REMOTE_PROXY: std::sync::Mutex<Option<RemoteState>> = std::sync::Mutex::new(None);
-#[tauri::command]
-fn sidecar_endpoint() -> String {
-    REMOTE_PROXY.lock().unwrap().as_ref().map(|p| p.proxy.endpoint.clone()).unwrap_or_else(|| format!("127.0.0.1:{}", sidecar_port()))
-}
-#[tauri::command]
-fn local_sidecar_endpoint() -> String { format!("127.0.0.1:{}", sidecar_port()) }
-#[tauri::command]
-fn remote_status() -> serde_json::Value {
-    let state = REMOTE_PROXY.lock().unwrap();
-    match state.as_ref() {
-        Some(s) => serde_json::json!({"status": *s.status.lock().unwrap(), "hostName": s.host_name, "remembered": true}),
-        None => { let identity = remote::Identity::load().ok(); serde_json::json!({"status":"disconnected", "hostName":identity.as_ref().map(|i| &i.host_name), "remembered":identity.is_some()}) }
-    }
-}
-fn remote_status_changed(app: &tauri::AppHandle, status: &std::sync::Mutex<String>, value: &str) {
-    *status.lock().unwrap() = value.into();
-    let _ = app.emit("remote:status", remote_status());
-}
-#[tauri::command]
-async fn remote_pair(app: tauri::AppHandle, uri: String, name: String) -> Result<String, String> {
-    remote::pair(&uri, &name).await?;
-    remote_connect(app).await
-}
-#[tauri::command]
-async fn remote_connect(app: tauri::AppHandle) -> Result<String, String> {
-    let identity = remote::Identity::load()?;
-    let proxy = remote::start_proxy(&identity).await?;
-    let session = std::sync::Arc::new(tokio::sync::Mutex::new(remote::connect(&identity).await?));
-    let mut event_session = remote::connect(&identity).await?;
-    event_session.subscribe().await?;
-    let status = std::sync::Arc::new(std::sync::Mutex::new("connected".to_string()));
-    let event_status = status.clone();
-    let host_name = identity.host_name.clone();
-    let event_app = app.clone();
-    let events = tauri::async_runtime::spawn(async move {
-        loop {
-            match event_session.next_event().await {
-                Ok(event) => if let Some(name) = event["event"].as_str() {
-                    if ["git:repo", "diff:changed", "note:changed", "store:changed", "file:changed", "run:manifests"].contains(&name) { let _ = event_app.emit(name, event["payload"].clone()); }
-                },
-                Err(_) => { remote_status_changed(&event_app, &event_status, "reconnecting"); loop {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    if let Ok(mut next) = remote::connect(&identity).await { if next.subscribe().await.is_ok() {
-                        if let (Ok(proxy), Ok(session)) = (remote::start_proxy(&identity).await, remote::connect(&identity).await) {
-                            let endpoint = proxy.endpoint.clone();
-                            if let Some(state) = REMOTE_PROXY.lock().unwrap().as_mut() { state.proxy = proxy; state.session = std::sync::Arc::new(tokio::sync::Mutex::new(session)); }
-                            event_session = next;
-                            remote_status_changed(&event_app, &event_status, "connected");
-                            let _ = event_app.emit("sidecar:endpoint", endpoint);
-                            break;
-                        }
-                    } }
-                } },
-            }
-        }
-    });
-    let endpoint = proxy.endpoint.clone();
-    *REMOTE_PROXY.lock().unwrap() = Some(RemoteState { proxy, session, events, status, host_name });
-    let _ = app.emit("sidecar:endpoint", &endpoint);
-    Ok(endpoint)
-}
-#[tauri::command]
-async fn remote_invoke(command: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    let session = REMOTE_PROXY.lock().unwrap().as_ref().map(|state| state.session.clone()).ok_or("Remote host disconnected")?;
-    let mut session = session.lock().await;
-    if ["read_file_bytes", "git_blob", "read_temp_image"].contains(&command.as_str()) {
-        return serde_json::to_value(session.call_bytes(&command, args).await?).map_err(|e| e.to_string());
-    }
-    session.call(&command, args).await
-}
-
-#[tauri::command]
-fn remote_disconnect(app: tauri::AppHandle) {
-    *REMOTE_PROXY.lock().unwrap() = None;
-    let _ = app.emit("sidecar:endpoint", local_sidecar_endpoint());
-}
-#[tauri::command]
-fn remote_forget(app: tauri::AppHandle) -> Result<(), String> {
-    remote_disconnect(app);
-    remote::Identity::forget()
-}
+use remote::{local_sidecar_endpoint, remote_bootstrap, remote_connect, remote_disconnect, remote_forget, remote_invoke, remote_pair, remote_status, sidecar_endpoint};
 const NOTIF_WIDTH: f64 = 448.0;
 // The overlay swallows clicks even on transparent pixels, so it must not cover the main
 // window's 24px status bar.
@@ -988,6 +905,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sidecar_endpoint,
             local_sidecar_endpoint,
+            remote_bootstrap,
             remote_pair,
             remote_connect,
             remote_disconnect,

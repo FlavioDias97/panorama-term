@@ -15,30 +15,34 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-mod wire;
-mod tunnel;
 pub(crate) mod desktop_tunnel;
-use wire::{Channel, session_key};
+mod tunnel;
+mod wire;
 #[cfg(test)]
-use wire::{nonce, DIR_CLIENT};
-#[cfg(test)]
-use crypto_secretbox::{XSalsa20Poly1305, aead::{Aead, KeyInit}};
+use crypto_secretbox::{
+    aead::{Aead, KeyInit},
+    XSalsa20Poly1305,
+};
 #[cfg(test)]
 use sha2::{Digest, Sha512};
+#[cfg(test)]
+use wire::{nonce, DIR_CLIENT};
+use wire::{session_key, Channel};
 
+#[allow(dead_code)]
+mod desktop_routes;
 mod presence;
 mod prompt;
 mod relay;
-#[allow(dead_code)]
-mod desktop_routes;
 pub(crate) use desktop_routes::pty_message_allowed as remote_pty_message_allowed;
 
 pub use prompt::{wait as wait_prompt, Wait as PromptWait};
 
 use super::{
-    activity, attach, build_frame, chat, files, hidden_command, find_transcript, forget_session, git_glance, panorama_dir, read_binding_rec, reflow,
-    run_commands, run_lookup_tile, run_start_json, run_status_json, run_stop, sessions, ui, urlenc,
-    write_atomic, write_input, Session,
+    activity, attach, build_frame, chat, files, find_transcript, forget_session, git_glance,
+    hidden_command, panorama_dir, read_binding_rec, reflow, run_commands, run_lookup_tile,
+    run_start_json, run_status_json, run_stop, sessions, ui, urlenc, write_atomic, write_input,
+    Session,
 };
 
 const PROTOCOL_VERSION: u64 = 1;
@@ -258,7 +262,9 @@ fn lan_addresses() -> Vec<String> {
     let primary = default_route_ip();
     ips.sort_by_key(|ip| address_rank(ip, primary));
     ips.dedup();
-    ips.into_iter().map(|ip| format!("{ip}:{}", port())).collect()
+    ips.into_iter()
+        .map(|ip| format!("{ip}:{}", port()))
+        .collect()
 }
 
 fn start_listener(st: &mut State) {
@@ -387,7 +393,11 @@ pub fn origin_allowed(origin: Option<&str>) -> bool {
     origin.map_or(true, |o| LOCAL_ORIGINS.contains(&o))
 }
 
-pub fn local_route(path: &str, query: &HashMap<String, String>, origin: Option<&str>) -> Option<(u16, String)> {
+pub fn local_route(
+    path: &str,
+    query: &HashMap<String, String>,
+    origin: Option<&str>,
+) -> Option<(u16, String)> {
     let action = path.strip_prefix("/mobile/")?;
     if !origin_allowed(origin) {
         return Some((403, json!({ "error": "origin not allowed" }).to_string()));
@@ -409,7 +419,9 @@ pub fn local_route(path: &str, query: &HashMap<String, String>, origin: Option<&
 }
 
 pub fn cors_origin(origin: Option<&str>) -> &str {
-    origin.filter(|o| LOCAL_ORIGINS.contains(o)).unwrap_or("null")
+    origin
+        .filter(|o| LOCAL_ORIGINS.contains(o))
+        .unwrap_or("null")
 }
 
 fn parse_json(plain: &[u8]) -> Option<Value> {
@@ -423,25 +435,46 @@ fn parse_json(plain: &[u8]) -> Option<Value> {
 async fn send_json(tx: &mut Tx, chan: &mut Channel, v: &Value) -> Result<(), ()> {
     let mut plain = vec![KIND_JSON];
     plain.extend_from_slice(v.to_string().as_bytes());
-    tx.send(Message::Binary(chan.seal(&plain))).await.map_err(|_| ())
+    tx.send(Message::Binary(chan.seal(&plain)))
+        .await
+        .map_err(|_| ())
 }
 
-async fn send_frame(tx: &mut Tx, chan: &mut Channel, tile_id: &str, frame: &[u8]) -> Result<(), ()> {
+async fn send_frame(
+    tx: &mut Tx,
+    chan: &mut Channel,
+    tile_id: &str,
+    frame: &[u8],
+) -> Result<(), ()> {
     let id = tile_id.as_bytes();
     let mut plain = Vec::with_capacity(3 + id.len() + frame.len());
     plain.push(KIND_FRAME);
     plain.extend_from_slice(&(id.len() as u16).to_le_bytes());
     plain.extend_from_slice(id);
     plain.extend_from_slice(frame);
-    tx.send(Message::Binary(chan.seal(&plain))).await.map_err(|_| ())
+    tx.send(Message::Binary(chan.seal(&plain)))
+        .await
+        .map_err(|_| ())
 }
 
 fn codes_match(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
-fn pairing_allowed(expected: &str, expires: Instant, granted: bool, code: &str, desktop: bool) -> bool {
-    Instant::now() < expires && desktop == granted && codes_match(expected, &code.to_ascii_uppercase())
+fn pairing_allowed(
+    expected: &str,
+    expires: Instant,
+    granted: bool,
+    code: &str,
+    desktop: bool,
+) -> bool {
+    Instant::now() < expires
+        && desktop == granted
+        && codes_match(expected, &code.to_ascii_uppercase())
 }
 
 fn pair_device(public_key: [u8; 32], code: &str, name: &str, desktop: bool) -> Option<String> {
@@ -514,7 +547,14 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx) -> Option<(Channel, String)> {
     });
     tx.send(Message::Text(reply.to_string())).await.ok()?;
 
-    let key = session_key(&secret, &client_pk, &client_pk, &server_pk, &client_nonce, &server_nonce)?;
+    let key = session_key(
+        &secret,
+        &client_pk,
+        &client_pk,
+        &server_pk,
+        &client_nonce,
+        &server_nonce,
+    )?;
     let mut chan = Channel::server(&key);
     let Message::Binary(first) = next_data(rx).await? else {
         return None;
@@ -539,6 +579,7 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx) -> Option<(Channel, String)> {
         "v": PROTOCOL_VERSION,
         "deviceId": device_id,
         "host": host_name(),
+        "addresses": lan_addresses(),
     });
     send_json(tx, &mut chan, &welcome).await.ok()?;
     Some((chan, device_id))
@@ -599,7 +640,9 @@ fn tiles_json() -> Value {
                 .as_ref()
                 .and_then(|b| b.get("agent").and_then(|a| a.as_str()).map(str::to_string));
             let last_activity = binding.as_ref().and_then(|b| {
-                b.get("lastActivity").and_then(|t| t.as_u64()).or_else(|| transcript_mtime_ms(b))
+                b.get("lastActivity")
+                    .and_then(|t| t.as_u64())
+                    .or_else(|| transcript_mtime_ms(b))
             });
             let snippet = tile_snippet(s, agent.as_deref());
             let model = s
@@ -627,7 +670,9 @@ fn tiles_json() -> Value {
 }
 
 fn str_param<'a>(p: &'a Value, key: &str) -> Result<&'a str, String> {
-    p.get(key).and_then(|v| v.as_str()).ok_or_else(|| format!("missing {key}"))
+    p.get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("missing {key}"))
 }
 
 fn live_session(tile_id: &str) -> Result<Arc<Session>, String> {
@@ -657,7 +702,10 @@ pub fn record_status(tile_id: &str, status: &Value) {
 }
 
 fn agent_status(tile_id: &str) -> Value {
-    agent_statuses().get(tile_id).cloned().unwrap_or(Value::Null)
+    agent_statuses()
+        .get(tile_id)
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn has_devices() -> bool {
@@ -669,7 +717,10 @@ fn prompt_title(view: &Value) -> String {
     match view["kind"].as_str() {
         Some("question") => "Claude has a question".into(),
         Some("plan") => "Claude has a plan ready".into(),
-        _ => format!("Claude wants to use {}", view["tool"].as_str().unwrap_or("a tool")),
+        _ => format!(
+            "Claude wants to use {}",
+            view["tool"].as_str().unwrap_or("a tool")
+        ),
     }
 }
 
@@ -698,7 +749,9 @@ pub fn agent_event(tile_id: &str, event: &str, evt: &Value) -> Option<String> {
 }
 
 fn is_push_token(token: &str) -> bool {
-    token.len() <= 256 && token.ends_with(']') && PUSH_TOKEN_PREFIXES.iter().any(|p| token.starts_with(p))
+    token.len() <= 256
+        && token.ends_with(']')
+        && PUSH_TOKEN_PREFIXES.iter().any(|p| token.starts_with(p))
 }
 
 fn register_push(device_id: &str, token: &str) {
@@ -725,7 +778,11 @@ fn register_push(device_id: &str, token: &str) {
 fn drop_push_tokens(tokens: &[String]) {
     let mut st = state();
     for device in st.devices.iter_mut() {
-        if device.push_token.as_ref().is_some_and(|t| tokens.contains(t)) {
+        if device
+            .push_token
+            .as_ref()
+            .is_some_and(|t| tokens.contains(t))
+        {
             device.push_token = None;
         }
     }
@@ -749,7 +806,11 @@ fn notify(tile_id: &str, title: &str, prompt: Option<&Value>) {
         if !st.enabled {
             return;
         }
-        let tokens: Vec<String> = st.devices.iter().filter_map(|d| d.push_token.clone()).collect();
+        let tokens: Vec<String> = st
+            .devices
+            .iter()
+            .filter_map(|d| d.push_token.clone())
+            .collect();
         (tokens, b64().encode(server_public_key(&st)))
     };
     if tokens.is_empty() || presence::desktop_in_use() {
@@ -883,13 +944,20 @@ fn transcript_for(tile_id: &str) -> Result<(String, Option<PathBuf>), String> {
     if binding["agent"].as_str() != Some("claude") {
         return Err("chat is only available for Claude tiles".into());
     }
-    let session_id = binding["agentSessionId"].as_str().ok_or("agent session not started")?;
-    Ok((session_id.to_string(), find_transcript(session_id, binding["cwd"].as_str())))
+    let session_id = binding["agentSessionId"]
+        .as_str()
+        .ok_or("agent session not started")?;
+    Ok((
+        session_id.to_string(),
+        find_transcript(session_id, binding["cwd"].as_str()),
+    ))
 }
 
 fn chat_update(tile_id: &str, cursor: Option<&ChatCursor>) -> Result<(ChatCursor, Value), String> {
     let (session_id, path) = transcript_for(tile_id)?;
-    let offset = cursor.filter(|c| c.session_id == session_id).map(|c| c.offset);
+    let offset = cursor
+        .filter(|c| c.session_id == session_id)
+        .map(|c| c.offset);
     let chunk = match path {
         Some(path) => chat::read_chunk(&path, offset).map_err(|e| e.to_string())?,
         None => chat::ChatChunk {
@@ -945,7 +1013,9 @@ fn subscribe_chat(p: &Value, subs: &mut Subs) -> Result<Value, String> {
 
 fn tile_cwd(tile_id: &str) -> Result<String, String> {
     let session = live_session(tile_id)?;
-    session.effective_cwd().ok_or_else(|| "tile has no folder yet".to_string())
+    session
+        .effective_cwd()
+        .ok_or_else(|| "tile has no folder yet".to_string())
 }
 
 fn run_kind(p: &Value) -> &'static str {
@@ -967,7 +1037,9 @@ async fn blocking<F>(f: F) -> Result<Value, String>
 where
     F: FnOnce() -> Result<Value, String> + Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 async fn run_overview(tile_id: &str) -> Result<Value, String> {
@@ -975,11 +1047,15 @@ async fn run_overview(tile_id: &str) -> Result<Value, String> {
     let detect_cwd = cwd.clone();
     let commands = blocking(move || Ok(run_commands::detect_json(&detect_cwd))).await?;
     let status = |kind: &str| parse_body(run_status_json(run_lookup_tile(kind, tile_id)));
-    Ok(json!({ "cwd": cwd, "commands": commands, "run": status("run")?, "build": status("build")? }))
+    Ok(
+        json!({ "cwd": cwd, "commands": commands, "run": status("run")?, "build": status("build")? }),
+    )
 }
 
 fn stop_run(tile_id: &str, kind: &str) {
-    let Some(s) = run_lookup_tile(kind, tile_id) else { return };
+    let Some(s) = run_lookup_tile(kind, tile_id) else {
+        return;
+    };
     if s.exited.load(Ordering::Relaxed) {
         forget_session(&s);
     } else {
@@ -991,17 +1067,29 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
     match method {
         "ping" => Ok(json!({})),
         "host.call" => {
-            if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+            if !state()
+                .devices
+                .iter()
+                .any(|d| d.id == subs.device_id && d.desktop)
+            {
                 return Err("Desktop capability required".into());
             }
-            crate::service_bridge::call(str_param(p, "command")?, p.get("args").cloned().unwrap_or(Value::Null)).await
-        },
+            crate::service_bridge::call(
+                str_param(p, "command")?,
+                p.get("args").cloned().unwrap_or(Value::Null),
+            )
+            .await
+        }
         "desktop.store_read" => {
-            if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+            if !state()
+                .devices
+                .iter()
+                .any(|d| d.id == subs.device_id && d.desktop)
+            {
                 return Err("Desktop capability required".into());
             }
             crate::service_bridge::call("store_read", json!({"name": str_param(p, "name")?})).await
-        },
+        }
         "tiles.list" => Ok(tiles_json()),
         "tile.open" => ui::open_tile(str_param(p, "cwd")?, p["agent"].as_str()),
         "run.list" => run_overview(str_param(p, "tileId")?).await,
@@ -1037,7 +1125,13 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
             let tile_id = str_param(p, "tileId")?;
             live_session(tile_id)?;
             let text = p["view"].as_str() == Some("text");
-            subs.terms.insert(tile_id.to_string(), TermSub { text, ..Default::default() });
+            subs.terms.insert(
+                tile_id.to_string(),
+                TermSub {
+                    text,
+                    ..Default::default()
+                },
+            );
             Ok(json!({}))
         }
         "term.unsubscribe" => {
@@ -1060,7 +1154,11 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
             Ok(json!({}))
         }
         "agent.answer" => {
-            prompt::answer(str_param(p, "tileId")?, str_param(p, "promptId")?, &p["answer"])?;
+            prompt::answer(
+                str_param(p, "tileId")?,
+                str_param(p, "promptId")?,
+                &p["answer"],
+            )?;
             Ok(json!({}))
         }
         "agent.attach" => {
@@ -1071,7 +1169,11 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
         "agent.send" => {
             let images: Vec<String> = p["images"]
                 .as_array()
-                .map(|list| list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
             attach::send(str_param(p, "tileId")?, str_param(p, "text")?, &images).await?;
             Ok(json!({}))
@@ -1118,7 +1220,12 @@ async fn push_chats(tx: &mut Tx, chan: &mut Channel, subs: &mut Subs) -> Result<
         if quiet {
             continue;
         }
-        send_json(tx, chan, &json!({ "t": "evt", "e": "chat", "tileId": tile_id, "r": body })).await?;
+        send_json(
+            tx,
+            chan,
+            &json!({ "t": "evt", "e": "chat", "tileId": tile_id, "r": body }),
+        )
+        .await?;
     }
     for (tile_id, seen) in subs.live_seen.iter_mut() {
         let Some(live) = live_snapshot(tile_id) else {
@@ -1128,7 +1235,12 @@ async fn push_chats(tx: &mut Tx, chan: &mut Channel, subs: &mut Subs) -> Result<
             continue;
         }
         *seen = live.clone();
-        send_json(tx, chan, &json!({ "t": "evt", "e": "live", "tileId": tile_id, "r": live })).await?;
+        send_json(
+            tx,
+            chan,
+            &json!({ "t": "evt", "e": "live", "tileId": tile_id, "r": live }),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1164,11 +1276,27 @@ async fn push_terms(tx: &mut Tx, chan: &mut Channel, subs: &mut Subs) -> Result<
         if patch.is_none() && !moved {
             continue;
         }
-        let mut r = patch.unwrap_or_else(|| json!({ "drop": 0, "keep": sub.lines.len(), "lines": [] }));
+        let mut r =
+            patch.unwrap_or_else(|| json!({ "drop": 0, "keep": sub.lines.len(), "lines": [] }));
         r["cursor"] = json!(view.cursor);
-        send_json(tx, chan, &json!({ "t": "evt", "e": "text", "tileId": tile_id, "r": r })).await?;
+        send_json(
+            tx,
+            chan,
+            &json!({ "t": "evt", "e": "text", "tileId": tile_id, "r": r }),
+        )
+        .await?;
     }
     Ok(())
+}
+
+fn event_or_resync(
+    event: Result<Value, tokio::sync::broadcast::error::RecvError>,
+) -> Option<Value> {
+    match event {
+        Ok(event) => Some(event),
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some(json!({"event":"resync"})),
+        Err(_) => None,
+    }
 }
 
 async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
@@ -1192,12 +1320,11 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                 }
             }
             event = host_events.recv(), if subscribed => {
-                if let Ok(event) = event {
-                    if send_json(&mut tx, &mut chan, &json!({"t":"host.event", "event":event["event"], "payload":event["payload"]})).await.is_err() { break; }
-                }
+                let Some(event) = event_or_resync(event) else { break };
+                if send_json(&mut tx, &mut chan, &json!({"t":"host.event", "event":event["event"], "payload":event["payload"]})).await.is_err() { break; }
             }
             Some(plain) = stream_rx.recv() => {
-                if plain.first() == Some(&0) { if let Ok(v) = serde_json::from_slice::<Value>(&plain[1..]) { if v["op"] == "close" { if let Some(id) = v["id"].as_u64() { mux.remove(id); } } } }
+                mux.sent(&plain);
                 if tx.send(Message::Binary(chan.seal(&plain))).await.is_err() { break; }
             }
             msg = rx.next() => match msg {
@@ -1212,6 +1339,23 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                         if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) { break; }
                         if req["op"] == "open" { desktop_tunnel::open(&req, &mut mux, &stream_tx).await; }
                         else if !mux.handle(&plain) { break; }
+                        continue;
+                    }
+                    if req["m"] == "host.call" && state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                        let out = stream_tx.clone();
+                        tokio::spawn(async move {
+                            let result = match req["p"]["command"].as_str() {
+                                Some(command) => crate::service_bridge::call(command, req["p"]["args"].clone()).await,
+                                None => Err("Missing command".into()),
+                            };
+                            let reply = match result {
+                                Ok(r) => json!({"t":"res", "id":req["id"], "ok":true, "r":r}),
+                                Err(e) => json!({"t":"res", "id":req["id"], "ok":false, "err":e}),
+                            };
+                            let mut plain = vec![0];
+                            plain.extend_from_slice(reply.to_string().as_bytes());
+                            let _ = out.send(plain).await;
+                        });
                         continue;
                     }
                     let reply = if req["m"] == "host.subscribe" && state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
@@ -1243,7 +1387,9 @@ async fn handle_conn(stream: TcpStream) {
 }
 
 async fn serve_session(mut tx: Tx, mut rx: Rx) {
-    let Ok(Some((chan, device_id))) = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut tx, &mut rx)).await else {
+    let Ok(Some((chan, device_id))) =
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut tx, &mut rx)).await
+    else {
         let _ = tx.close().await;
         return;
     };
@@ -1252,6 +1398,20 @@ async fn serve_session(mut tx: Tx, mut rx: Rx) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn lost_host_events_request_resync() {
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(1);
+        sender.send(serde_json::json!({"event":"first"})).unwrap();
+        sender.send(serde_json::json!({"event":"second"})).unwrap();
+        assert_eq!(
+            super::event_or_resync(receiver.recv().await).unwrap()["event"],
+            "resync"
+        );
+        assert_eq!(
+            super::event_or_resync(receiver.recv().await).unwrap()["event"],
+            "second"
+        );
+    }
     use super::*;
 
     #[test]
@@ -1259,7 +1419,9 @@ mod tests {
         let key = [7u8; 32];
         let mut server = Channel::server(&key);
         let client = XSalsa20Poly1305::new((&key).into());
-        let sealed = client.encrypt(&nonce(DIR_CLIENT, 0), b"\x00{}".as_slice()).unwrap();
+        let sealed = client
+            .encrypt(&nonce(DIR_CLIENT, 0), b"\x00{}".as_slice())
+            .unwrap();
         assert_eq!(server.open(&sealed).as_deref(), Some(b"\x00{}".as_slice()));
         assert!(server.open(&sealed).is_none());
     }
@@ -1270,7 +1432,15 @@ mod tests {
         let client = StaticSecret::from([2u8; 32]);
         let client_pk = PublicKey::from(&client).to_bytes();
         let (cn, sn) = ([3u8; 24], [4u8; 24]);
-        let key = session_key(&server, &client_pk, &client_pk, PublicKey::from(&server).as_bytes(), &cn, &sn).unwrap();
+        let key = session_key(
+            &server,
+            &client_pk,
+            &client_pk,
+            PublicKey::from(&server).as_bytes(),
+            &cn,
+            &sn,
+        )
+        .unwrap();
         let shared = client.diffie_hellman(&PublicKey::from(&server));
         let mut h = Sha512::new();
         h.update(shared.as_bytes());
@@ -1283,7 +1453,15 @@ mod tests {
 
     #[test]
     fn rejects_low_order_client_key() {
-        assert!(session_key(&StaticSecret::from([1u8; 32]), &[0u8; 32], &[0u8; 32], &[1u8; 32], &[0; 24], &[0; 24]).is_none());
+        assert!(session_key(
+            &StaticSecret::from([1u8; 32]),
+            &[0u8; 32],
+            &[0u8; 32],
+            &[1u8; 32],
+            &[0; 24],
+            &[0; 24]
+        )
+        .is_none());
     }
 
     #[test]
@@ -1306,12 +1484,18 @@ mod tests {
 
     #[test]
     fn unregistered_tickets_map_back_to_tokens() {
-        let messages = vec![json!({ "to": "ExpoPushToken[a]" }), json!({ "to": "ExpoPushToken[b]" })];
+        let messages = vec![
+            json!({ "to": "ExpoPushToken[a]" }),
+            json!({ "to": "ExpoPushToken[b]" }),
+        ];
         let tickets = json!({ "data": [
             { "status": "ok", "id": "x" },
             { "status": "error", "details": { "error": "DeviceNotRegistered" } },
         ] });
-        assert_eq!(unregistered_tokens(&messages, &tickets), vec!["ExpoPushToken[b]".to_string()]);
+        assert_eq!(
+            unregistered_tokens(&messages, &tickets),
+            vec!["ExpoPushToken[b]".to_string()]
+        );
     }
 
     #[test]
