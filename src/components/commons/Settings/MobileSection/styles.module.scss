@@ -62,9 +62,7 @@
   border: 1px solid var(--border-2);
   border-radius: 6px;
   background: var(--surface-1);
-  transition:
-    border-color 0.12s ease,
-    color 0.12s ease;
+  transition: border-color 0.12s ease, color 0.12s ease;
 
   &:hover {
     color: var(--text-strong);

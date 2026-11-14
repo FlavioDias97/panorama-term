@@ -296,7 +296,9 @@ pub fn write_value(name: &str, value: &Value) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn store_read(name: String) -> Result<Option<Value>, String> { read_value(&name) }
+pub fn store_read(name: String) -> Result<Option<Value>, String> {
+    read_value(&name)
+}
 
 #[tauri::command]
 pub fn store_write(name: String, value: Value, origin: Option<String>) -> Result<(), String> {

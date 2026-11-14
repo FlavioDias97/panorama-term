@@ -16,7 +16,8 @@ export const readTextFile = (path: string): Promise<string> => invoke<string>('r
 
 export const readFileBytes = (path: string): Promise<ArrayBuffer> => invoke<ArrayBuffer>('read_file_bytes', { path });
 
-export const writeTextFile = (path: string, content: string): Promise<void> => invoke<void>('write_text_file', { path, content });
+export const writeTextFile = (path: string, content: string): Promise<void> =>
+  invoke<void>('write_text_file', { path, content });
 
 export const createEntry = (path: string, dir: boolean): Promise<void> => invoke<void>('create_entry', { path, dir });
 

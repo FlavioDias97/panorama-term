@@ -1,38 +1,7 @@
 import { isRemote } from '~/adapter/transport';
 import React from 'react';
 import type { EditorView } from '@codemirror/view';
-import {
-  X,
-  Pin,
-  Play,
-  Code2,
-  History,
-  Minus,
-  Square,
-  Link2,
-  PinOff,
-  Copy,
-  Focus,
-  Pencil,
-  Hammer,
-  Trash2,
-  ArrowUp,
-  Loader2,
-  Maximize,
-  Minimize,
-  RotateCw,
-  CopyPlus,
-  ArrowDown,
-  Link2Off,
-  GitBranch,
-  ShieldCheck,
-  SquareTerminal,
-  ChevronDown,
-  FolderOpen,
-  ClipboardCopy,
-  ClipboardPaste,
-  ArrowLeftRight
-} from 'lucide-react';
+import { X, Pin, Play, Code2, History, Minus, Square, Link2, PinOff, Copy, Focus, Pencil, Hammer, Trash2, ArrowUp, Loader2, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, Link2Off, GitBranch, ShieldCheck, SquareTerminal, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste, ArrowLeftRight } from 'lucide-react';
 
 import type { Tile, View, FsBox } from '~/domain/interfaces/canvas.interface';
 import type { RunPhase } from '~/domain/interfaces/run.interface';
@@ -134,64 +103,13 @@ const DRAG_THRESHOLD = 4;
 
 const RUN_ICON = 14;
 
-const PHASE_LABEL: Record<RunPhase, string> = {
-  starting: 'Starting',
-  restarting: 'Restarting',
-  stopping: 'Stopping',
-  killing: 'Killing'
-};
+const PHASE_LABEL: Record<RunPhase, string> = { starting: 'Starting', restarting: 'Restarting', stopping: 'Stopping', killing: 'Killing' };
 
 const commitCount = (n: number): string => (n > 99 ? '99+' : String(n));
 
 const tileCrash = (retry: () => void) => <CrashNotice title="This tile hit an error" action="Reload tile" onAction={retry} />;
 
-const TileFrame = ({
-  tile,
-  view,
-  active,
-  selected,
-  alert,
-  visible,
-  live,
-  hidden,
-  fullscreen,
-  exiting,
-  fsBox,
-  onMove,
-  onSnap,
-  onClose,
-  onResize,
-  onActivate,
-  onFocusTile,
-  onToggleFullscreen,
-  onCwd,
-  onAgentState,
-  onOscTitle,
-  onNoteChange,
-  onNoteEditor,
-  onNoteTitle,
-  onCopyNote,
-  onCopyNoteSelection,
-  onPasteNote,
-  onToggleRaw,
-  onRename,
-  onCopyPath,
-  onReveal,
-  onDuplicate,
-  onTogglePin,
-  onToggleSelect,
-  onOpenRunOutput,
-  wsId,
-  linkActive,
-  linkTarget,
-  linkedTerms,
-  onLink,
-  onUnlink,
-  onLinkDragStart,
-  tabs,
-  activeTabId,
-  onMoveToTab
-}: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, fsBox, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onAgentState, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, onOpenRunOutput, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart, tabs, activeTabId, onMoveToTab }: TileFrameProps) => {
   const k = view.k;
   const parts = useHeaderParts();
   const cellW = useTermCellWidth();
@@ -285,24 +203,18 @@ const TileFrame = ({
   const spinning = !tile.userTitle && agentBusy && hasSpinnerPrefix(oscTitle);
   const label = tile.runCwd
     ? tile.userTitle || tile.autoTitle || 'run'
-    : tile.userTitle ||
-      (agentType && oscTitle && (spinning ? oscTitle : stripSpinner(oscTitle))) ||
-      (tile.type === 'editor' ? tile.autoTitle : tile.cwd) ||
-      tile.autoTitle ||
-      `${tile.type} · ${tile.id}`;
-  const folder =
-    tile.cwd && label !== tile.cwd
-      ? tile.cwd
-          .replace(/[\\/]+$/, '')
-          .split(/[\\/]/)
-          .pop()
-      : '';
+    : tile.userTitle
+      || (agentType && oscTitle && (spinning ? oscTitle : stripSpinner(oscTitle)))
+      || (tile.type === 'editor' ? tile.autoTitle : tile.cwd)
+      || tile.autoTitle
+      || `${tile.type} · ${tile.id}`;
+  const folder = tile.cwd && label !== tile.cwd ? tile.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '';
 
   const note = tile.type === 'note';
   const code = tile.type === 'code';
   const editor = tile.type === 'editor';
   const runView = Boolean(tile.runCwd);
-  const runCwd = tile.type === 'term' ? (tile.runCwd ?? tile.cwd) : undefined;
+  const runCwd = tile.type === 'term' ? tile.runCwd ?? tile.cwd : undefined;
   const runTile = tile.type === 'term' ? (runView ? tile.ptySessionId?.replace(/^(run|build):/, '') : tile.id) : undefined;
   const viewKind = runView && tile.ptySessionId?.startsWith('build:') ? ('build' as const) : ('run' as const);
   const run = useRun(runCwd, runTile, viewKind);
@@ -312,18 +224,8 @@ const TileFrame = ({
   const building = build.status.state === 'running';
   const buildOk = build.status.state === 'exited' && (build.status.exitCode ?? 0) === 0;
   const buildFailed = build.status.state === 'exited' && (build.status.exitCode ?? 0) !== 0 && !build.status.stoppedByUser;
-  const showRunBtn =
-    parts.run &&
-    tile.type === 'term' &&
-    !runView &&
-    Boolean(tile.cwd) &&
-    (run.commands.length > 0 || run.status.state !== 'none');
-  const showBuildBtn =
-    parts.build &&
-    tile.type === 'term' &&
-    !runView &&
-    Boolean(tile.cwd) &&
-    (build.commands.length > 0 || build.status.state !== 'none');
+  const showRunBtn = parts.run && tile.type === 'term' && !runView && Boolean(tile.cwd) && (run.commands.length > 0 || run.status.state !== 'none');
+  const showBuildBtn = parts.build && tile.type === 'term' && !runView && Boolean(tile.cwd) && (build.commands.length > 0 || build.status.state !== 'none');
   const [runMenu, setRunMenu] = React.useState<{ x: number; y: number } | null>(null);
   const [buildMenu, setBuildMenu] = React.useState<{ x: number; y: number } | null>(null);
   const [killMenu, setKillMenu] = React.useState<{ x: number; y: number } | null>(null);
@@ -372,8 +274,7 @@ const TileFrame = ({
     ) : (
       <Play size={RUN_ICON} strokeWidth={2} />
     );
-  const runStopTip =
-    run.phase === 'stopping' ? 'Kill process now' : run.phase === 'killing' ? 'Killing process tree' : `Stop '${runCmd}'`;
+  const runStopTip = run.phase === 'stopping' ? 'Kill process now' : run.phase === 'killing' ? 'Killing process tree' : `Stop '${runCmd}'`;
   const buildTip = build.phase
     ? `${PHASE_LABEL[build.phase]} '${buildCmd}'`
     : building
@@ -389,24 +290,13 @@ const TileFrame = ({
   React.useEffect(() => {
     if (!run.crashed) return;
     run.clearCrashed();
-    if (!runView)
-      notifyClaude(
-        tile.id,
-        'generic',
-        `${run.crashed.cmd ?? 'run'} exited with code ${run.crashed.exitCode ?? '?'}`,
-        'Run crashed'
-      );
+    if (!runView) notifyClaude(tile.id, 'generic', `${run.crashed.cmd ?? 'run'} exited with code ${run.crashed.exitCode ?? '?'}`, 'Run crashed');
   }, [run, runView, tile.id]);
 
   React.useEffect(() => {
     if (!build.crashed) return;
     build.clearCrashed();
-    notifyClaude(
-      tile.id,
-      'generic',
-      `${build.crashed.cmd ?? 'build'} exited with code ${build.crashed.exitCode ?? '?'}`,
-      'Build failed'
-    );
+    notifyClaude(tile.id, 'generic', `${build.crashed.cmd ?? 'build'} exited with code ${build.crashed.exitCode ?? '?'}`, 'Build failed');
   }, [build, tile.id]);
 
   const buildStop = build.stop;
@@ -475,10 +365,7 @@ const TileFrame = ({
       ]
     : [
         ...(build.status.sessionId
-          ? ([
-              { label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openBuildOutput },
-              'separator'
-            ] as ContextMenuEntry[])
+          ? ([{ label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openBuildOutput }, 'separator'] as ContextMenuEntry[])
           : []),
         ...build.commands.map((cmd) => ({
           label: cmd === build.defaultCmd ? `${cmd}  (default)` : cmd,
@@ -531,10 +418,7 @@ const TileFrame = ({
 
   const sections = note ? noteTabs(tile.content) : [];
   const activeTabName = note ? parseFrontField(tile.content, 'tab') : '';
-  const tab = Math.max(
-    0,
-    sections.findIndex((s) => s.name === activeTabName)
-  );
+  const tab = Math.max(0, sections.findIndex((s) => s.name === activeTabName));
 
   const saveTabs = (next: NoteTab[], active: number) => {
     const named = nameTabs(next);
@@ -552,10 +436,7 @@ const TileFrame = ({
     add: () => saveTabs([...sections, { name: '', text: '' }], sections.length),
     rename: (i, name) => {
       if (sections.some((s, j) => j !== i && s.name === name)) return;
-      saveTabs(
-        sections.map((s, j) => (j === i ? { ...s, name } : s)),
-        tab
-      );
+      saveTabs(sections.map((s, j) => (j === i ? { ...s, name } : s)), tab);
     },
     close: (i) => {
       const rest = sections.filter((_, j) => j !== i);
@@ -669,18 +550,18 @@ const TileFrame = ({
   const ideItem: ContextMenuEntry = !ideCwd
     ? { label: 'Open in IDE', icon: <Code2 size={15} strokeWidth={1.75} />, disabled: true }
     : idesLoading && !ides.length
-      ? { label: 'Detecting IDEs...', icon: <Loader2 size={15} strokeWidth={1.75} className={styles.spin} />, disabled: true }
-      : !ides.length
-        ? { label: 'No IDEs found', icon: <Code2 size={15} strokeWidth={1.75} />, disabled: true }
-        : {
-            label: 'Open in IDE',
-            disabled: isRemote(),
-            icon: <Code2 size={15} strokeWidth={1.75} />,
-            submenu: ides.map((ide) => ({
-              label: ide.recommended ? `${ide.label}  (recommended)` : ide.label,
-              onSelect: () => openInIde(ideCwd, ide.command, ide.family)
-            }))
-          };
+    ? { label: 'Detecting IDEs...', icon: <Loader2 size={15} strokeWidth={1.75} className={styles.spin} />, disabled: true }
+    : !ides.length
+    ? { label: 'No IDEs found', icon: <Code2 size={15} strokeWidth={1.75} />, disabled: true }
+    : {
+        label: 'Open in IDE',
+        disabled: isRemote(),
+        icon: <Code2 size={15} strokeWidth={1.75} />,
+        submenu: ides.map((ide) => ({
+          label: ide.recommended ? `${ide.label}  (recommended)` : ide.label,
+          onSelect: () => openInIde(ideCwd, ide.command, ide.family)
+        }))
+      };
 
   const noteContentItems: ContextMenuEntry[] = menuInContent
     ? [
@@ -749,34 +630,29 @@ const TileFrame = ({
   const menuItems: ContextMenuEntry[] = note
     ? noteMenuItems
     : runView
-      ? runViewMenuItems
-      : [
-          { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
-          { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
-          pinItem,
-          'separator',
-          { label: 'Copy title', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyTitle },
-          {
-            label: 'Reveal in explorer',
-            icon: <FolderOpen size={15} strokeWidth={1.75} />,
-            onSelect: reveal,
-            disabled: !tile.cwd || isRemote()
-          },
-          { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
-          ideItem,
-          'separator',
-          { label: 'Restart terminal', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: restartTile },
-          {
-            label: elevated ? 'Restart as user' : 'Restart as administrator',
-            icon: <ShieldCheck size={15} strokeWidth={1.75} />,
-            onSelect: toggleElevated
-          },
-          ...linkItems,
-          { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
-          fullscreenItem,
-          'separator',
-          closeItem
-        ];
+    ? runViewMenuItems
+    : [
+        { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
+        { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
+        pinItem,
+        'separator',
+        { label: 'Copy title', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyTitle },
+        { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: reveal, disabled: !tile.cwd || isRemote() },
+        { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
+        ideItem,
+        'separator',
+        { label: 'Restart terminal', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: restartTile },
+        {
+          label: elevated ? 'Restart as user' : 'Restart as administrator',
+          icon: <ShieldCheck size={15} strokeWidth={1.75} />,
+          onSelect: toggleElevated
+        },
+        ...linkItems,
+        { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
+        fullscreenItem,
+        'separator',
+        closeItem
+      ];
 
   if (otherTabs.length > 0 && !note) {
     const moveItem: ContextMenuEntry = {
@@ -807,17 +683,7 @@ const TileFrame = ({
   const termCols = Math.max(20, Math.floor((bodyW - 8) / cellW));
   const termRows = Math.max(2, Math.floor((bodyH - TILE_HEADER - 11) / 15));
   const anim = fullscreen ? (exiting ? styles.fsExit : styles.fsEnter) : null;
-  const cls = [
-    styles.tile,
-    note && styles.sticky,
-    tile.pinned && styles.pinnedTile,
-    note && linkActive && styles.linkActive,
-    selected && !fullscreen && styles.selected,
-    active && !fullscreen && styles.active,
-    anim
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, note && linkActive && styles.linkActive, selected && !fullscreen && styles.selected, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
   const gone = { display: hidden ? 'none' : undefined };
   const showTabs = note && !fullscreen && !hidden && (active || sections.length > 1);
   const tabsStyle: React.CSSProperties = {
@@ -926,11 +792,7 @@ const TileFrame = ({
                   aria-label={building ? 'Rebuild project' : 'Build project'}
                   data-tooltip={buildTip}
                 >
-                  {build.phase ? (
-                    <Loader2 size={RUN_ICON} strokeWidth={2} className={styles.spin} />
-                  ) : (
-                    <Hammer size={RUN_ICON} strokeWidth={2} />
-                  )}
+                  {build.phase ? <Loader2 size={RUN_ICON} strokeWidth={2} className={styles.spin} /> : <Hammer size={RUN_ICON} strokeWidth={2} />}
                   {buildOk && <span className={`${styles.statusBadge} ${styles.badgeOk}`} />}
                   {buildFailed && <span className={`${styles.statusBadge} ${styles.badgeErr}`} />}
                 </button>
@@ -977,11 +839,7 @@ const TileFrame = ({
                     aria-label={runKillable ? 'Kill process' : 'Stop run'}
                     data-tooltip={runStopTip}
                   >
-                    {runKillable ? (
-                      <X size={RUN_ICON} strokeWidth={2.5} />
-                    ) : (
-                      <Square size={RUN_ICON} strokeWidth={2} fill="currentColor" />
-                    )}
+                    {runKillable ? <X size={RUN_ICON} strokeWidth={2.5} /> : <Square size={RUN_ICON} strokeWidth={2} fill="currentColor" />}
                   </button>
                 )}
                 {(run.status.state !== 'none' || run.commands.length > 1) && (
@@ -1003,7 +861,7 @@ const TileFrame = ({
                 onClick={toggleRaw}
                 aria-label={tile.renderOnly ? 'Show markdown on edit' : 'Rendered only'}
                 data-tooltip={tile.renderOnly ? 'Rendered' : 'Live edit'}
-                style={tint ? { ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text } : undefined}
+                style={tint ? ({ ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text }) : undefined}
               >
                 <span className={styles.rawGlyph}>M</span>
               </button>
@@ -1013,7 +871,7 @@ const TileFrame = ({
                 className={linkedTerms.length ? `${styles.action} ${styles.linked}` : styles.action}
                 onPointerDown={startLinkDrag}
                 aria-label="Link note to terminal"
-                style={tint ? { ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text } : undefined}
+                style={tint ? ({ ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text }) : undefined}
               >
                 <span className={styles.rawGlyph}>
                   <Link2 size={12} strokeWidth={2} />
@@ -1064,13 +922,7 @@ const TileFrame = ({
               </button>
             )}
             {runView && (
-              <button
-                className={styles.action}
-                onClick={closeTile}
-                onPointerDown={stopDrag}
-                aria-label="Hide output"
-                data-tooltip="Hide (keeps running)"
-              >
+              <button className={styles.action} onClick={closeTile} onPointerDown={stopDrag} aria-label="Hide output" data-tooltip="Hide (keeps running)">
                 <Minus size={14} strokeWidth={2} />
               </button>
             )}
@@ -1095,15 +947,7 @@ const TileFrame = ({
         <div className={styles.body} onContextMenu={note ? (e) => openMenu(e, true) : undefined}>
           <ErrorBoundary fallback={tileCrash}>
             {note && (
-              <NoteTile
-                tile={tile}
-                tab={tab}
-                wsId={wsId}
-                active={active}
-                onChange={onNoteChange}
-                onActivate={onActivate}
-                onEditor={onNoteEditor}
-              />
+              <NoteTile tile={tile} tab={tab} wsId={wsId} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
             )}
             {code && tile.cwd && tile.filePath && <DiffViewer root={tile.cwd} file={tile.filePath} mode={EMBED} />}
             {editor && tile.filePath && <EditorTile tile={tile} active={active} onActivate={onActivate} />}
@@ -1175,12 +1019,7 @@ const TileFrame = ({
           x={killMenu.x}
           y={killMenu.y}
           items={[
-            {
-              label: `Kill ${run.status.cmd ?? 'process'}`,
-              icon: <X size={15} strokeWidth={1.75} />,
-              danger: true,
-              onSelect: killRun
-            },
+            { label: `Kill ${run.status.cmd ?? 'process'}`, icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: killRun },
             { label: 'Cancel', onSelect: closeKillMenu }
           ]}
           onClose={closeKillMenu}

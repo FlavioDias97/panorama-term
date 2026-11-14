@@ -15,9 +15,11 @@ export const startMobilePairing = (desktop = false): Promise<MobilePairing> =>
 
 export const cancelMobilePairing = (): Promise<MobileState> => request<MobileState>('cancel', 'POST');
 
-export const setMobileEnabled = (on: boolean): Promise<MobileState> => request<MobileState>(`enable?on=${on ? 1 : 0}`, 'POST');
+export const setMobileEnabled = (on: boolean): Promise<MobileState> =>
+  request<MobileState>(`enable?on=${on ? 1 : 0}`, 'POST');
 
-export const setMobileRemote = (on: boolean): Promise<MobileState> => request<MobileState>(`remote?on=${on ? 1 : 0}`, 'POST');
+export const setMobileRemote = (on: boolean): Promise<MobileState> =>
+  request<MobileState>(`remote?on=${on ? 1 : 0}`, 'POST');
 
 export const revokeMobileDevice = (id: string): Promise<MobileState> =>
   request<MobileState>(`revoke?id=${encodeURIComponent(id)}`, 'POST');

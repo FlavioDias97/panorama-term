@@ -250,7 +250,9 @@ fn save_temp_image(name: &str, bytes: &[u8]) -> Result<String, String> {
     let safe: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')).collect();
     if safe.is_empty() || safe != name || safe == "." || safe == ".." || bytes.len() > 5 * 1024 * 1024 { return Err("invalid image".into()); }
     let path = std::env::temp_dir().join("panorama-paste").join(safe);
-    if let Some(dir) = path.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }

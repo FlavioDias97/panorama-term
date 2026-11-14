@@ -31,7 +31,9 @@ export const startRun = (cwd: string, cmd: string, tile: string, kind: RunKind =
     .catch(() => NONE);
 
 export const stopRun = (tile: string, hard = false, kind: RunKind = 'run'): Promise<unknown> =>
-  fetch(`${SIDECAR_HTTP}/run/stop?kind=${kind}&tile=${encodeURIComponent(tile)}${hard ? '&hard=1' : ''}`).catch(() => undefined);
+  fetch(`${SIDECAR_HTTP}/run/stop?kind=${kind}&tile=${encodeURIComponent(tile)}${hard ? '&hard=1' : ''}`).catch(
+    () => undefined
+  );
 
 type Listener = (s: RunStatus) => void;
 

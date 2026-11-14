@@ -358,9 +358,7 @@ const GitTab = ({ root, query, active, onFiles, onOpenDiff, onOpenFile }: GitTab
       if (total === 0) continue;
       const hidden = repos.reduce((sum, repo) => sum + withheld(repo.root, id), 0);
       const groups = repos
-        .map(
-          (repo) => [repo, filesOf(repo.root, id).filter((file) => !needle || file.path.toLowerCase().includes(needle))] as const
-        )
+        .map((repo) => [repo, filesOf(repo.root, id).filter((file) => !needle || file.path.toLowerCase().includes(needle))] as const)
         .filter(([, files]) => files.length > 0);
       const files = groups.flatMap(([, shown]) => shown);
       out.push({ kind: 'section', id, open: !shut(id), label, total, keys: files.map(changeKey), files });
@@ -560,12 +558,7 @@ const GitTab = ({ root, query, active, onFiles, onOpenDiff, onOpenFile }: GitTab
   const ignoreEntries = (files: FileChange[]): ContextMenuEntry[] => {
     const repo = files[0]?.repo;
     if (!repo || files.some((f) => f.repo !== repo)) return [];
-    return [
-      gitEntry(
-        repo,
-        files.map((f) => f.path)
-      )
-    ];
+    return [gitEntry(repo, files.map((f) => f.path))];
   };
 
   const addIgnore = (repo: string, patterns: string[], local: boolean) => {

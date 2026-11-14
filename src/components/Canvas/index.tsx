@@ -58,7 +58,11 @@ const DBLCLICK_MS = 400;
 
 let pendingFocusTileId: string | null = null;
 
-const jumpToWorkspaceTab = async (wsId: string, tabId: string, switchWorkspace: (id: string) => Promise<void>): Promise<void> => {
+const jumpToWorkspaceTab = async (
+  wsId: string,
+  tabId: string,
+  switchWorkspace: (id: string) => Promise<void>
+): Promise<void> => {
   await workspaceService.setActiveTab(wsId, tabId);
   await switchWorkspace(wsId);
 };
@@ -71,8 +75,17 @@ interface Menu {
 }
 
 const Canvas = () => {
-  const { tabs, activeId, switchTab, workspaces, activeState, activeTabId, moveTileToTab, switchWorkspace, saveActiveState } =
-    useWorkspace();
+  const {
+    tabs,
+    activeId,
+    switchTab,
+    workspaces,
+    activeState,
+    activeTabId,
+    moveTileToTab,
+    switchWorkspace,
+    saveActiveState
+  } = useWorkspace();
   const {
     view,
     tiles,
@@ -199,14 +212,7 @@ const Canvas = () => {
       const wx = (e.clientX - v.x) / v.k;
       const wy = (e.clientY - v.y) / v.k;
       const term = tilesR.current.find(
-        (t) =>
-          t.type === 'term' &&
-          t.id !== dragId &&
-          !t.runCwd &&
-          wx >= t.x &&
-          wx <= t.x + t.width &&
-          wy >= t.y &&
-          wy <= t.y + t.height
+        (t) => t.type === 'term' && t.id !== dragId && !t.runCwd && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
       );
       setLinkDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY, over: term?.id ?? null } : d));
     };
@@ -395,7 +401,12 @@ const Canvas = () => {
     const top = (t.y + inset) * view.k + view.y;
     const w = (t.width - TILE_GAP) * view.k;
     const h = (t.height - TILE_GAP) * view.k;
-    return left < size.w + CULL_MARGIN && left + w > -CULL_MARGIN && top < size.h + CULL_MARGIN && top + h > -CULL_MARGIN;
+    return (
+      left < size.w + CULL_MARGIN &&
+      left + w > -CULL_MARGIN &&
+      top < size.h + CULL_MARGIN &&
+      top + h > -CULL_MARGIN
+    );
   };
 
   const [receded, setReceded] = React.useState<Set<string>>(new Set());
@@ -629,7 +640,8 @@ const Canvas = () => {
     setActiveEditorTab(tabKey(request.kind, request.path));
   };
 
-  const openEditorFile = (root: string, path: string, preview?: boolean) => openEditorTab({ kind: 'file', root, path, preview });
+  const openEditorFile = (root: string, path: string, preview?: boolean) =>
+    openEditorTab({ kind: 'file', root, path, preview });
   const openDiff = (root: string, path: string, commit?: string) => openEditorTab({ kind: 'diff', root, path, commit });
 
   React.useEffect(
@@ -658,7 +670,7 @@ const Canvas = () => {
   const closeEditorTab = (key: string) => {
     setEditorTabs((prev) => {
       const next = prev.filter((t) => t.key !== key);
-      setActiveEditorTab((cur) => (cur === key ? (next[next.length - 1]?.key ?? null) : cur));
+      setActiveEditorTab((cur) => (cur === key ? next[next.length - 1]?.key ?? null : cur));
       return next;
     });
   };
@@ -787,21 +799,11 @@ const Canvas = () => {
           <svg className={styles.links} width={size.w} height={size.h}>
             {tiles.map((t) => {
               if ((t.type !== 'note' && t.type !== 'term') || !t.linkedTo?.length) return null;
-              const srcRect = {
-                x: t.x * view.k + view.x,
-                y: t.y * view.k + view.y,
-                width: t.width * view.k,
-                height: t.height * view.k
-              };
+              const srcRect = { x: t.x * view.k + view.x, y: t.y * view.k + view.y, width: t.width * view.k, height: t.height * view.k };
               return t.linkedTo.map((termId) => {
                 const term = tiles.find((x) => x.id === termId);
                 if (!term) return null;
-                const termRect = {
-                  x: term.x * view.k + view.x,
-                  y: term.y * view.k + view.y,
-                  width: term.width * view.k,
-                  height: term.height * view.k
-                };
+                const termRect = { x: term.x * view.k + view.x, y: term.y * view.k + view.y, width: term.width * view.k, height: term.height * view.k };
                 const d = flowPath(srcRect, termRect);
                 const removeLink = (e: React.PointerEvent) => {
                   e.stopPropagation();
@@ -820,12 +822,7 @@ const Canvas = () => {
               (() => {
                 const src = tiles.find((x) => x.id === linkDrag.srcId);
                 if (!src) return null;
-                const srcRect = {
-                  x: src.x * view.k + view.x,
-                  y: src.y * view.k + view.y,
-                  width: src.width * view.k,
-                  height: src.height * view.k
-                };
+                const srcRect = { x: src.x * view.k + view.x, y: src.y * view.k + view.y, width: src.width * view.k, height: src.height * view.k };
                 const d = flowPath(srcRect, { x: linkDrag.x, y: linkDrag.y, width: 0, height: 0 });
                 return <path d={d} className={styles.linkLine} />;
               })()}
@@ -846,28 +843,26 @@ const Canvas = () => {
               })()}
           </svg>
         )}
-        {!fsId && frames.map((f) => <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />)}
+        {!fsId &&
+          frames.map((f) => (
+            <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />
+          ))}
         {tiles.map((t) => {
           const vis = isVisible(t);
           if (vis && (t.width - TILE_GAP) * view.k >= MIN_LIVE_WIDTH) activated.current.add(t.id);
           const live = activated.current.has(t.id);
           const linkedIds =
             t.type === 'note'
-              ? (t.linkedTo ?? [])
+              ? t.linkedTo ?? []
               : t.type === 'term' && !t.runCwd
-                ? [
-                    ...new Set([
-                      ...(t.linkedTo ?? []),
-                      ...tiles.filter((x) => x.type === 'term' && (x.linkedTo ?? []).includes(t.id)).map((x) => x.id)
-                    ])
-                  ]
+                ? [...new Set([...(t.linkedTo ?? []), ...tiles.filter((x) => x.type === 'term' && (x.linkedTo ?? []).includes(t.id)).map((x) => x.id)])]
                 : [];
           const linkActive = t.type === 'note' && linkedIds.some((id) => id === activeTile || selected.has(id));
           const cand = t.type === 'note' ? adjacentTerm(t, tiles) : null;
           const linkCand = cand && !linkedIds.includes(cand.id) ? cand : null;
           const linkedTerms = linkedIds
             .map((id) => tiles.find((x) => x.id === id))
-            .filter((x): x is (typeof tiles)[number] => Boolean(x))
+            .filter((x): x is typeof tiles[number] => Boolean(x))
             .map((term) => ({ id: term.id, name: termName(term) }));
           return (
             <TileFrame
@@ -946,7 +941,9 @@ const Canvas = () => {
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
-        {!fsId && <Minimap view={view} tiles={tiles} agents={agents} alerts={alertKinds} viewportRef={bgRef} onPan={panTo} />}
+        {!fsId && (
+          <Minimap view={view} tiles={tiles} agents={agents} alerts={alertKinds} viewportRef={bgRef} onPan={panTo} />
+        )}
       </div>
       <Toasts />
       {commandBarOpen && <CommandBar sources={commandBarSources} onClose={closeCommandBar} />}
@@ -972,7 +969,12 @@ const Canvas = () => {
         />
       )}
       {tileToClose && (
-        <UnsavedDialog paths={[tileToClose.path]} onSave={onSaveTile} onDiscard={discardTile} onCancel={cancelCloseTile} />
+        <UnsavedDialog
+          paths={[tileToClose.path]}
+          onSave={onSaveTile}
+          onDiscard={discardTile}
+          onCancel={cancelCloseTile}
+        />
       )}
       {!navOpen && (
         <div className={styles.navRevealZone}>

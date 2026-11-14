@@ -6,6 +6,8 @@ export const dockerAvailable = (): Promise<boolean> => invoke<boolean>('docker_a
 
 export const dockerPs = (): Promise<DockerContainer[]> => invoke<DockerContainer[]>('docker_ps');
 
-export const dockerAction = (id: string, action: DockerAction): Promise<void> => invoke<void>('docker_action', { id, action });
+export const dockerAction = (id: string, action: DockerAction): Promise<void> =>
+  invoke<void>('docker_action', { id, action });
 
-export const dockerEngine = (action: 'start' | 'stop'): Promise<void> => invoke<void>('docker_engine', { action });
+export const dockerEngine = (action: 'start' | 'stop'): Promise<void> =>
+  invoke<void>('docker_engine', { action });

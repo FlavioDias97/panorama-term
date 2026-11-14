@@ -30,7 +30,10 @@ test('concurrent tab save and tab switch keep both writes and never cross tabs',
   const tile = { id: 't1', type: 'note', x: 0, y: 0, width: 10, height: 10, zIndex: 1 };
   const state = { version: 1, tiles: [tile], viewport: { zoom: 1, centerX: 0, centerY: 0 } };
 
-  await Promise.all([workspaceService.saveTabState(wsId, tab1!, state as never), workspaceService.setActiveTab(wsId, tab2.id)]);
+  await Promise.all([
+    workspaceService.saveTabState(wsId, tab1!, state as never),
+    workspaceService.setActiveTab(wsId, tab2.id)
+  ]);
 
   expect((await workspaceService.getTabs(wsId)).activeTabId).toBe(tab2.id);
   expect((await workspaceService.loadTabState(wsId, tab1!))!.tiles).toHaveLength(1);

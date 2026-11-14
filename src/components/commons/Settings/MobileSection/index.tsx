@@ -103,8 +103,8 @@ const MobileSection = () => {
                 </div>
               )}
               <p className={settingsStyles.hint}>
-                The phone must reach this computer on the same network or over Tailscale. Windows may ask to allow Panorama
-                through the firewall.
+                The phone must reach this computer on the same network or over Tailscale. Windows may ask to allow
+                Panorama through the firewall.
               </p>
             </div>
           )}
