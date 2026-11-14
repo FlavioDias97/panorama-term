@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod service_bridge;
 mod git;
 mod store;
 mod docker;
@@ -878,7 +879,9 @@ pub fn run() {
             if let Err(err) = store::init() {
                 eprintln!("[store] init failed: {err}");
             }
+            store::set_app(app.handle().clone());
             spawn_sidecar();
+            service_bridge::start(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(main) = app.get_webview_window("main") {
                 compact_traffic_lights(main.ns_window());

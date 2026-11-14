@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
+mod service_bridge;
 mod ui;
 mod host;
 mod chat;
@@ -4171,6 +4172,15 @@ async fn handle_conn(mut stream: TcpStream) {
 
     let origin = headers.get("origin").map(String::as_str);
 
+    if is_ws && path_only == "/host-service" {
+        if service_bridge::authorized(&headers) {
+            if let Some(ws) = accept_ws(stream, &headers).await {
+                service_bridge::serve(ws).await;
+            }
+        }
+        return;
+    }
+
     if is_ws && path_only == "/ui" {
         if !mobile::origin_allowed(origin) {
             return;
@@ -4594,6 +4604,7 @@ async fn main() {
     let listener = TcpListener::bind(("127.0.0.1", port()))
         .await
         .expect("bind sidecar port");
+    if let Err(e) = service_bridge::init() { eprintln!("[host service] {e}"); }
     mobile::boot();
     tokio::spawn(async {
         let mut tick = tokio::time::interval(Duration::from_secs(5));

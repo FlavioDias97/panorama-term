@@ -8,6 +8,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 const SCHEMA_VERSION: i64 = 1;
+static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+pub(crate) fn set_app(app: tauri::AppHandle) { let _ = APP.set(app); }
+fn changed(names: Vec<String>) {
+    use tauri::Emitter;
+    if let Some(app) = APP.get() { let _ = app.emit("store:changed", serde_json::json!({ "names": names })); }
+}
 
 #[derive(Deserialize)]
 pub struct Entry {
@@ -276,7 +282,9 @@ pub fn store_read(name: String) -> Result<Option<Value>, String> {
 
 #[tauri::command]
 pub fn store_write(name: String, value: Value) -> Result<(), String> {
-    write_value(&name, &value)
+    write_value(&name, &value)?;
+    changed(vec![name]);
+    Ok(())
 }
 
 #[tauri::command]
@@ -289,7 +297,10 @@ pub fn store_write_many(entries: Vec<Entry>) -> Result<(), String> {
     for entry in &entries {
         put(&tx, &entry.name, &entry.value)?;
     }
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    drop(conn);
+    changed(entries.into_iter().map(|entry| entry.name).collect());
+    Ok(())
 }
 
 #[tauri::command]
@@ -298,6 +309,8 @@ pub fn store_delete(name: String) -> Result<(), String> {
     let conn = db()?.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM kv WHERE name = ?1", params![name])
         .map_err(|e| e.to_string())?;
+    drop(conn);
+    changed(vec![name]);
     Ok(())
 }
 
@@ -398,6 +411,8 @@ mod tests {
 
         assert_eq!(store_list("workspaces".into()).unwrap(), vec!["ws-1.json"]);
         assert!(store_read("workspaces.json".into()).unwrap().is_some());
+        let remote = tauri::async_runtime::block_on(crate::service_bridge::dispatch("store_read", &serde_json::json!({"name": "workspaces.json"}))).unwrap();
+        assert_eq!(remote, serde_json::json!({ "order": ["ws-1"] }));
         assert!(store_write_many(vec![Entry { name: "../escape.json".into(), value: serde_json::json!(1) }]).is_err());
         assert!(store_read("../escape.json".into()).is_err());
 
