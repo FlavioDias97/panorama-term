@@ -45,6 +45,8 @@ async fn remote_data_and_events_through_sidecar() {
     request.headers_mut().insert("authorization", format!("Bearer {secret}").parse().unwrap());
     let (mut provider, _) = tokio_tungstenite::connect_async_with_config(request, None, true).await.unwrap();
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Value>(1);
+    let mut store_events = panorama_lib::store::subscribe();
+    let mut provider_ui = panorama_lib::store::subscribe();
     let provider_task = tokio::spawn(async move {
         let mut watches = Watches::default();
         loop { tokio::select! {
@@ -57,6 +59,9 @@ async fn remote_data_and_events_through_sidecar() {
                 let response = match result { Ok(result) => json!({"id":req["id"],"result":result}), Err(error) => json!({"id":req["id"],"error":error}) }.to_string();
                 assert!(response.len() < 1024 * 1024);
                 provider.send(Message::Text(response.into())).await.unwrap();
+            },
+            event = store_events.recv() => if let Ok(payload) = event {
+                provider.send(Message::Text(json!({"event":"store:changed","payload":payload}).to_string().into())).await.unwrap();
             },
             event = event_rx.recv() => if let Some(event) = event { provider.send(Message::Text(event.to_string().into())).await.unwrap(); } else { break; }
         }}
@@ -76,5 +81,22 @@ async fn remote_data_and_events_through_sidecar() {
     event_tx.send(json!({"event":"git:repo","payload":{"root":"test"}})).await.unwrap();
     let event = tokio::time::timeout(Duration::from_secs(5), events.next_event()).await.unwrap().unwrap();
     assert_eq!(event["event"], "git:repo"); assert_eq!(event["payload"]["root"], "test");
+    service_bridge::dispatch("store_write", &json!({"name":"workspaces/local.json","value":{"tiles":[1]},"origin":"provider"})).await.unwrap();
+    let provider_local = provider_ui.recv().await.unwrap();
+    assert_eq!(provider_local["origin"], "provider");
+    let local = tokio::time::timeout(Duration::from_secs(5), events.next_event()).await.unwrap().unwrap();
+    assert_eq!(local["payload"]["name"], "workspaces/local.json");
+    assert_eq!(local["payload"]["origin"], "provider");
+    session.call("store_write", json!({"name":"workspaces/remote.json","value":{"tiles":[2]},"origin":"client"})).await.unwrap();
+    let provider_remote = tokio::time::timeout(Duration::from_secs(5), provider_ui.recv()).await.unwrap().unwrap();
+    assert_eq!(provider_remote["origin"], "client");
+    assert_eq!(provider_remote["name"], "workspaces/remote.json");
+    let remote = tokio::time::timeout(Duration::from_secs(5), events.next_event()).await.unwrap().unwrap();
+    assert_eq!(remote["payload"]["name"], "workspaces/remote.json");
+    assert_eq!(remote["payload"]["origin"], "client");
+    assert!(remote["payload"]["revision"].as_i64().unwrap() > local["payload"]["revision"].as_i64().unwrap());
+    assert_eq!(service_bridge::dispatch("store_read", &json!({"name":"workspaces/remote.json"})).await.unwrap(), json!({"tiles":[2]}));
+    assert!(tokio::time::timeout(Duration::from_millis(300), events.next_event()).await.is_err());
+    assert!(tokio::time::timeout(Duration::from_millis(300), provider_ui.recv()).await.is_err());
     provider_task.abort();
 }

@@ -1,4 +1,7 @@
 import React from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { storeOrigin } from '~/adapter/store/store.client';
+import { createDeferredReload, shouldReload, type StoreChange } from '~/usecase/util/storeSync';
 
 import type { TabMeta, CanvasState, WorkspaceMeta } from '~/domain/interfaces/workspace.interface';
 import { clearTabAlerts } from '~/usecase/util/alerts';
@@ -31,6 +34,50 @@ export const useWorkspaces = () => {
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const current = React.useRef({ activeId, activeTabId });
+  current.current = { activeId, activeTabId };
+  React.useEffect(() => {
+    let alive = true;
+    let queue = Promise.resolve();
+    const deferred = createDeferredReload((names) => {
+      queue = queue.then(async () => {
+        await workspaceService.invalidate(names);
+        const list = await workspaceService.list();
+        if (!alive) return;
+        setWorkspaces(list.workspaces);
+        const { activeId: active, activeTabId: tab } = current.current;
+        const target = active && list.workspaces.some((ws) => ws.id === active) ? active : list.activeId;
+        if (target !== active) setActiveId(target);
+        if (target && (target !== active || names.includes(`workspaces/${target}.json`))) {
+          const result = await workspaceService.getTabs(target);
+          const selected = tab && result.tabs.some((t) => t.id === tab) ? tab : result.activeTabId;
+          const state = selected ? await workspaceService.loadTabState(target, selected) : null;
+          if (!alive) return;
+          setTabs(result.tabs);
+          setActiveTabId(selected);
+          setActiveState(state);
+        }
+      }).catch(console.error);
+    });
+    const down = () => deferred.start();
+    const up = () => deferred.end();
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('blur', up);
+    window.addEventListener('pointercancel', up, true);
+    const off = listen<StoreChange>('store:changed', ({ payload }) => {
+      if (shouldReload(payload, storeOrigin)) deferred.change(payload.name);
+    });
+    return () => {
+      alive = false;
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('blur', up);
+      window.removeEventListener('pointercancel', up, true);
+      void off.then((unlisten) => unlisten());
+    };
+  }, []);
 
   const refreshTabsMeta = React.useCallback(async (wsId: string) => {
     const res = await workspaceService.getTabs(wsId);

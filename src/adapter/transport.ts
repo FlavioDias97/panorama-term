@@ -84,8 +84,8 @@ export const createTransport = (invoke: Invoke, remoteMode: () => boolean) => {
       if (!host.length) return invoke<T>(command, args);
       if (!local.length) return invoke<T>('remote_invoke', { command, args });
       return Promise.all([
-        invoke(command, { entries: local }),
-        invoke('remote_invoke', { command, args: { entries: host } })
+        invoke(command, { entries: local, ...(args.origin ? { origin: args.origin } : {}) }),
+        invoke('remote_invoke', { command, args: { entries: host, ...(args.origin ? { origin: args.origin } : {}) } })
       ]).then(() => undefined as T);
     }
     const toHost = hostCommands.has(command) || (command.startsWith('store_') && hostStore(args.name ?? args.dir));

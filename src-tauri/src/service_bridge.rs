@@ -25,9 +25,9 @@ fn bytes(response: tauri::ipc::Response) -> Result<Vec<u8>, String> {
 pub async fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
     match command {
         "store_read" => value(crate::store::store_read(arg(args, "name")?)?),
-        "store_write" => value(crate::store::store_write(arg(args, "name")?, arg(args, "value")?)?),
-        "store_write_many" => value(crate::store::store_write_many(arg(args, "entries")?)?),
-        "store_delete" => value(crate::store::store_delete(arg(args, "name")?)?),
+        "store_write" => value(crate::store::store_write(arg(args, "name")?, arg(args, "value")?, arg(args, "origin")?)?),
+        "store_write_many" => value(crate::store::store_write_many(arg(args, "entries")?, arg(args, "origin")?)?),
+        "store_delete" => value(crate::store::store_delete(arg(args, "name")?, arg(args, "origin")?)?),
         "store_list" => value(crate::store::store_list(arg(args, "dir")?)?),
         "read_dir" => value(crate::read_dir(arg(args, "path")?).await?),
         "read_file_bytes" => value(bytes(crate::read_file_bytes(arg(args, "path")?)?)?),

@@ -8,7 +8,7 @@ use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewW
 pub mod remote;
 pub mod service_bridge;
 mod git;
-mod store;
+pub mod store;
 mod docker;
 mod notes;
 mod plugins;

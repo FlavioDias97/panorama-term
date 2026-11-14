@@ -145,6 +145,16 @@ class Service {
     return idx;
   }
 
+  invalidate(names: string[]): Promise<void> {
+    return this.serial(async () => {
+      for (const name of names) {
+        if (name === INDEX_FILE) this.cachedIndex = null;
+        const match = /^workspaces\/([^/]+)\.json$/.exec(name);
+        if (match) this.cachedFiles.delete(match[1]!);
+      }
+    });
+  }
+
   async list(): Promise<{ activeId: string | null; workspaces: WorkspaceMeta[] }> {
     const idx = await this.loadIndex();
     const workspaces: WorkspaceMeta[] = [];
