@@ -6,7 +6,7 @@ export const setRemote = (value: boolean): void => {
 };
 export const isRemote = (): boolean => remote;
 
-const hostCommands = new Set([
+export const hostCommands = new Set([
   'read_dir',
   'read_text_file',
   'read_file_bytes',
@@ -90,8 +90,7 @@ export const createTransport = (invoke: Invoke, remoteMode: () => boolean) => {
     }
     const toHost = hostCommands.has(command) || (command.startsWith('store_') && hostStore(args.name ?? args.dir));
     if (!toHost) return invoke<T>(command, args);
-    const result = invoke<T>('remote_invoke', { command, args });
-    return bytesCommands.has(command) ? result.then((data) => new Uint8Array(data as number[]).buffer as T) : result;
+    return invoke<T>(bytesCommands.has(command) ? 'remote_invoke_bytes' : 'remote_invoke', { command, args });
   };
   return call;
 };

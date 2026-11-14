@@ -75,13 +75,7 @@ impl Drop for Proxy {
         self.accept_task.abort();
     }
 }
-const ORIGINS: &[&str] = &[
-    "tauri://localhost",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-    "http://localhost:1471",
-    "http://127.0.0.1:1471",
-];
+
 fn parse_request(
     head: &str,
     token: &str,
@@ -115,7 +109,10 @@ fn parse_request(
     if headers.get("host").copied() != Some(format!("127.0.0.1:{port}").as_str()) {
         return None;
     }
-    if headers.get("origin").is_some_and(|o| !ORIGINS.contains(o)) {
+    if headers
+        .get("origin")
+        .is_some_and(|o| !super::local_origins::LOCAL_ORIGINS.contains(o))
+    {
         return None;
     }
     let ws = headers

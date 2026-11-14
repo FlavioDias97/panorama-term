@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use subtle::ConstantTimeEq;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
@@ -65,6 +66,10 @@ pub fn init() -> Result<(), String> {
 }
 
 pub fn authorized(headers: &HashMap<String, String>) -> bool {
+    authorized_with_secret(headers, SECRET.get().map(String::as_str))
+}
+
+fn authorized_with_secret(headers: &HashMap<String, String>, secret: Option<&str>) -> bool {
     headers.get("origin").is_none()
         && headers
             .get("host")
@@ -73,8 +78,8 @@ pub fn authorized(headers: &HashMap<String, String>) -> bool {
         && headers
             .get("authorization")
             .and_then(|h| h.strip_prefix("Bearer "))
-            .zip(SECRET.get())
-            .map(|(a, b)| a == b)
+            .zip(secret)
+            .map(|(a, b)| bool::from(a.as_bytes().ct_eq(b.as_bytes())))
             .unwrap_or(false)
 }
 
@@ -96,7 +101,6 @@ fn disconnect(generation: u64) {
 }
 
 // Internal API for the desktop transport; it is not exposed as an HTTP route.
-#[allow(dead_code)]
 pub async fn call(command: &str, args: Value) -> Result<Value, String> {
     call_with_timeout(command, args, std::time::Duration::from_secs(60)).await
 }
@@ -129,7 +133,6 @@ async fn call_with_timeout(
     state().lock().unwrap().pending.remove(&id);
     result.map_err(|_| "Host service request timed out".to_string())?
 }
-#[allow(dead_code)]
 pub fn subscribe() -> broadcast::Receiver<Value> {
     events().subscribe()
 }
@@ -149,13 +152,19 @@ pub async fn serve(ws: WebSocketStream<TcpStream>) {
                 },
             },
             incoming = stream.next() => match incoming {
-                Some(Ok(Message::Text(s))) => if state().lock().unwrap().provider.as_ref().map(|p| p.generation) != Some(generation) { break } else if let Ok(v) = serde_json::from_str::<Value>(&s) {
+                Some(Ok(Message::Text(s))) => if state().lock().unwrap().provider.as_ref()
+                    .map(|p| p.generation) != Some(generation) { break }
+                else if let Ok(v) = serde_json::from_str::<Value>(&s) {
                     if let Some(id) = v.get("id").and_then(Value::as_u64) {
                         let reply = { let mut state = state().lock().unwrap();
                             if state.provider.as_ref().map(|p| p.generation) == Some(generation) { state.pending.remove(&id) } else { None }
                         };
                         if let Some(reply) = reply {
-                            let result = if let Some(error) = v.get("error").and_then(Value::as_str) { Err(error.to_string()) } else { Ok(v.get("result").cloned().unwrap_or(Value::Null)) };
+                            let result = if let Some(error) = v.get("error").and_then(Value::as_str) {
+                                Err(error.to_string())
+                            } else {
+                                Ok(v.get("result").cloned().unwrap_or(Value::Null))
+                            };
                             let _ = reply.send(result);
                         }
                     } else if v.get("event").and_then(Value::as_str).is_some() {
@@ -175,18 +184,30 @@ mod tests {
     use super::*;
     #[test]
     fn authorization_rejects_wrong_secret_and_browser_origin() {
-        let _ = SECRET.set("test-secret".into());
         let mut headers = HashMap::from([
             ("host".into(), format!("127.0.0.1:{}", crate::port())),
             ("authorization".into(), "Bearer wrong".into()),
         ]);
-        assert!(!authorized(&headers));
+        assert!(!authorized_with_secret(&headers, Some("test-secret")));
         headers.insert("authorization".into(), "Bearer test-secret".into());
-        assert!(authorized(&headers));
+        assert!(authorized_with_secret(&headers, Some("test-secret")));
         headers.insert("origin".into(), "https://example.com".into());
-        assert!(!authorized(&headers));
+        assert!(!authorized_with_secret(&headers, Some("test-secret")));
+    }
+    #[test]
+    fn isolated_bridge_test() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "service_bridge::tests::unavailable_and_replacement",
+                "--ignored",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
     #[tokio::test]
+    #[ignore]
     async fn unavailable_and_replacement() {
         assert_eq!(
             call("store_read", json!({})).await.unwrap_err(),

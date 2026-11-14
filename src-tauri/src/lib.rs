@@ -1,3 +1,5 @@
+#[path = "../../sidecar-rs/src/config_dir.rs"]
+mod config_dir;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -72,7 +74,10 @@ fn host_port() -> u16 {
     configured_port(std::env::var("PANORAMA_HOST_PORT").ok().as_deref(), HOST_PORT)
 }
 
-use remote::{local_sidecar_endpoint, remote_bootstrap, remote_connect, remote_disconnect, remote_forget, remote_invoke, remote_pair, remote_status, sidecar_endpoint};
+use remote::{
+    local_sidecar_endpoint, remote_bootstrap, remote_connect, remote_disconnect, remote_forget,
+    remote_invoke, remote_invoke_bytes, remote_pair, remote_status, sidecar_endpoint,
+};
 const NOTIF_WIDTH: f64 = 448.0;
 // The overlay swallows clicks even on transparent pixels, so it must not cover the main
 // window's 24px status bar.
@@ -912,6 +917,7 @@ pub fn run() {
             remote_forget,
             remote_status,
             remote_invoke,
+            remote_invoke_bytes,
             write_temp_image,
             read_temp_image,
             has_clipboard_image,

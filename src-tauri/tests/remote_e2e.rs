@@ -92,8 +92,9 @@ async fn mobile_v1(uri: &str) {
         .unwrap()
         .try_into()
         .unwrap();
-    let mut chan = wire::Channel::client(
+    let mut chan = wire::Channel::new(
         &wire::session_key(&secret, &host, &public, &host, &cn, &sn).unwrap(),
+        wire::DIR_CLIENT,
     );
     let mut intro = vec![0];
     intro.extend_from_slice(

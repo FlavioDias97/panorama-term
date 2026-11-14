@@ -15,8 +15,7 @@ import type {
   RepoOperationAction
 } from '~/domain/interfaces/git.interface';
 
-export const gitBranches = (path: string): Promise<BranchSnapshot> =>
-  invoke<BranchSnapshot>('git_branches', { path });
+export const gitBranches = (path: string): Promise<BranchSnapshot> => invoke<BranchSnapshot>('git_branches', { path });
 
 export const watchRepo = (path: string, onState: (state: RepoState | null) => void): (() => void) => {
   let alive = true;
@@ -50,8 +49,7 @@ export const gitStashCheckout = (path: string, branch: string): Promise<BranchSn
 export const gitOperation = (path: string, action: RepoOperationAction): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_operation', { path, action });
 
-export const gitFetch = (path: string): Promise<BranchSnapshot> =>
-  invoke<BranchSnapshot>('git_fetch', { path });
+export const gitFetch = (path: string): Promise<BranchSnapshot> => invoke<BranchSnapshot>('git_fetch', { path });
 
 export const gitCreateBranch = (
   path: string,
@@ -80,14 +78,10 @@ export const gitRebaseOnto = (path: string, branch: string): Promise<BranchSnaps
 export const gitUpdateBranch = (path: string, rebase: boolean): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_update_branch', { path, rebase });
 
-export const gitPushCurrent = (path: string): Promise<BranchSnapshot> =>
-  invoke<BranchSnapshot>('git_push_current', { path });
+export const gitPushCurrent = (path: string): Promise<BranchSnapshot> => invoke<BranchSnapshot>('git_push_current', { path });
 
-export const gitSetUpstream = (
-  path: string,
-  branch: string,
-  upstream: string | null
-): Promise<BranchSnapshot> => invoke<BranchSnapshot>('git_set_upstream', { path, branch, upstream });
+export const gitSetUpstream = (path: string, branch: string, upstream: string | null): Promise<BranchSnapshot> =>
+  invoke<BranchSnapshot>('git_set_upstream', { path, branch, upstream });
 
 export const gitCompareWithCurrent = (path: string, branch: string): Promise<CommitInfo[]> =>
   invoke<CommitInfo[]>('git_compare_with_current', { path, branch });
@@ -109,8 +103,7 @@ export const gitCommit = (path: string, files: string[], message: string, amend:
 export const gitLogMessages = (path: string, limit = 20): Promise<CommitMessageEntry[]> =>
   invoke<CommitMessageEntry[]>('git_log_messages', { path, limit });
 
-export const gitLogGraph = (path: string, limit = 200): Promise<LogRow[]> =>
-  invoke<LogRow[]>('git_log_graph', { path, limit });
+export const gitLogGraph = (path: string, limit = 200): Promise<LogRow[]> => invoke<LogRow[]>('git_log_graph', { path, limit });
 
 export const gitRemoteUrl = (path: string): Promise<string> => invoke<string>('git_remote_url', { path });
 
@@ -129,8 +122,7 @@ export const gitDiffWithRef = (path: string, reference: string): Promise<FileCha
 export const gitCommitDiffFile = (path: string, commit: string, file: string): Promise<FileDiff> =>
   invoke<FileDiff>('git_commit_diff_file', { path, commit, file });
 
-export const gitRollbackFile = (path: string, file: string): Promise<void> =>
-  invoke<void>('git_rollback_file', { path, file });
+export const gitRollbackFile = (path: string, file: string): Promise<void> => invoke<void>('git_rollback_file', { path, file });
 
 export const gitAddIgnore = (path: string, pattern: string, local: boolean): Promise<void> =>
   invoke<void>('git_add_ignore', { path, pattern, local });
@@ -138,7 +130,6 @@ export const gitAddIgnore = (path: string, pattern: string, local: boolean): Pro
 export const gitRevertHunk = (path: string, file: string, content: string, crlf: boolean): Promise<void> =>
   invoke<void>('git_revert_hunk', { path, file, content, crlf });
 
-export const gitWatchFile = (path: string, file: string): Promise<number> =>
-  invoke<number>('git_watch_file', { path, file });
+export const gitWatchFile = (path: string, file: string): Promise<number> => invoke<number>('git_watch_file', { path, file });
 
 export const gitUnwatchFile = (id: number): Promise<void> => invoke<void>('git_unwatch_file', { id });

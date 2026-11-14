@@ -1,9 +1,10 @@
 mod client;
+#[path = "../../../sidecar-rs/src/local_origins.rs"]
+mod local_origins;
 #[path = "../../../sidecar-rs/src/mobile/wire.rs"]
 mod wire;
 pub use client::{connect, pair, Identity, Session};
 
-#[allow(dead_code)]
 #[path = "../../../sidecar-rs/src/mobile/desktop_routes.rs"]
 mod desktop_routes;
 mod proxy;
@@ -97,17 +98,7 @@ async fn activate(app: tauri::AppHandle, offline: bool) -> Result<String, String
                 if name == "connected" || name == "reconnecting" {
                     *event_status.lock().unwrap() = name.to_owned();
                     let _ = event_app.emit("remote:status", remote_status());
-                } else if [
-                    "git:repo",
-                    "diff:changed",
-                    "note:changed",
-                    "store:changed",
-                    "file:changed",
-                    "run:manifests",
-                    "resync",
-                ]
-                .contains(&name)
-                {
+                } else if name == "resync" || crate::service_bridge::HOST_EVENTS.contains(&name) {
                     let _ = event_app.emit(name, event["payload"].clone());
                 }
             }
@@ -148,27 +139,72 @@ pub async fn remote_invoke(command: String, args: Value) -> Result<Value, String
         .as_ref()
         .map(|s| s.proxy.caller())
         .ok_or("Remote host disconnected")?;
+    caller.call(&command, args).await
+}
+
+#[tauri::command]
+pub async fn remote_invoke_bytes(
+    command: String,
+    args: Value,
+) -> Result<tauri::ipc::Response, String> {
+    if !["read_file_bytes", "git_blob", "read_temp_image"].contains(&command.as_str()) {
+        return Err("Command not allowed".into());
+    }
+    let caller = REMOTE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.proxy.caller())
+        .ok_or("Remote host disconnected")?;
     let mut result = caller.call(&command, args).await?;
-    if ["read_file_bytes", "git_blob", "read_temp_image"].contains(&command.as_str()) {
-        let mut bytes = Vec::new();
-        loop {
-            bytes.extend(
-                STANDARD
-                    .decode(result["bytes"].as_str().ok_or("Invalid byte chunk")?)
-                    .map_err(|e| e.to_string())?,
-            );
-            match result["next"].as_str() {
-                Some(token) => {
-                    result = caller
-                        .call("read_bytes_chunk", json!({"token": token}))
-                        .await?
-                }
-                None => return serde_json::to_value(bytes).map_err(|e| e.to_string()),
+    let mut bytes = Vec::new();
+    loop {
+        match append_chunk(&result, &mut bytes)? {
+            Some(token) => {
+                result = caller
+                    .call("read_bytes_chunk", json!({"token": token}))
+                    .await?
             }
+            None => return Ok(tauri::ipc::Response::new(bytes)),
         }
     }
-    Ok(result)
 }
+
+fn append_chunk(result: &Value, bytes: &mut Vec<u8>) -> Result<Option<String>, String> {
+    bytes.extend(
+        STANDARD
+            .decode(result["bytes"].as_str().ok_or("Invalid byte chunk")?)
+            .map_err(|e| e.to_string())?,
+    );
+    Ok(result["next"].as_str().map(str::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
+    #[tokio::test]
+    async fn binary_ipc_uses_raw_response_and_restricts_commands() {
+        let mut bytes = Vec::new();
+        assert_eq!(
+            append_chunk(&json!({"bytes":"AP8=", "next":"token"}), &mut bytes).unwrap(),
+            Some("token".into())
+        );
+        assert_eq!(
+            append_chunk(&json!({"bytes":"Kg==", "next":null}), &mut bytes).unwrap(),
+            None
+        );
+        assert!(append_chunk(&json!({"bytes":"!"}), &mut bytes).is_err());
+        assert!(
+            matches!(tauri::ipc::Response::new(bytes).body().unwrap(), InvokeResponseBody::Raw(data) if data == [0, 255, 42])
+        );
+        assert!(remote_invoke_bytes("git_status".into(), json!({}))
+            .await
+            .is_err());
+    }
+}
+
 #[tauri::command]
 pub fn remote_disconnect(app: tauri::AppHandle) {
     *REMOTE.lock().unwrap() = None;

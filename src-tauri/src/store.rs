@@ -17,8 +17,13 @@ pub fn subscribe() -> tokio::sync::broadcast::Receiver<Value> {
 fn revisions(conn: &Connection, names: impl IntoIterator<Item = String>, origin: Option<String>) -> Result<Vec<Value>, String> {
     let mut events = Vec::new();
     for name in names {
-        conn.execute("INSERT INTO meta (key, value) VALUES ('store_revision', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1", []).map_err(|e| e.to_string())?;
-        let revision: i64 = conn.query_row("SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'store_revision'", [], |row| row.get(0)).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('store_revision', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+            [],
+        ).map_err(|e| e.to_string())?;
+        let revision: i64 = conn.query_row(
+            "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'store_revision'", [], |row| row.get(0)
+        ).map_err(|e| e.to_string())?;
         events.push(serde_json::json!({ "name": name, "revision": revision, "origin": origin }));
     }
     Ok(events)
@@ -38,11 +43,12 @@ pub struct Entry {
 }
 
 pub(crate) fn base_dir() -> Result<PathBuf, String> {
-    if let Ok(dir) = std::env::var("PANORAMA_CONFIG_DIR") {
-        return Ok(PathBuf::from(dir));
-    }
     let name = if cfg!(debug_assertions) { "panorama-dev" } else { "panorama" };
-    Ok(dirs::config_dir().ok_or("no config dir")?.join(name))
+    crate::config_dir::config_dir(
+        std::env::var_os("PANORAMA_CONFIG_DIR").map(Into::into),
+        dirs::config_dir(),
+        name,
+    ).ok_or_else(|| "no config dir".into())
 }
 
 fn valid_name(name: &str) -> Result<(), String> {
@@ -425,7 +431,9 @@ mod tests {
 
         assert_eq!(store_list("workspaces".into()).unwrap(), vec!["ws-1.json"]);
         assert!(store_read("workspaces.json".into()).unwrap().is_some());
-        let remote = tauri::async_runtime::block_on(crate::service_bridge::dispatch("store_read", &serde_json::json!({"name": "workspaces.json"}))).unwrap();
+        let remote = tauri::async_runtime::block_on(crate::service_bridge::dispatch(
+            "store_read", &serde_json::json!({"name": "workspaces.json"})
+        )).unwrap();
         assert_eq!(remote, serde_json::json!({ "order": ["ws-1"] }));
         assert!(store_write_many(vec![Entry { name: "../escape.json".into(), value: serde_json::json!(1) }], None).is_err());
         assert!(store_read("../escape.json".into()).is_err());

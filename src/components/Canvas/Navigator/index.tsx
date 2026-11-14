@@ -196,7 +196,12 @@ const Navigator = ({ tiles, frames, activeTile, activeDiff, alerts, agents, hand
       onSelect: () => openFile(entry.path),
       disabled: entry.dir
     },
-    { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: () => revealPath(entry.path), disabled: isRemote() },
+    {
+      label: 'Reveal in explorer',
+      icon: <FolderOpen size={15} strokeWidth={1.75} />,
+      onSelect: () => revealPath(entry.path),
+      disabled: isRemote()
+    },
     {
       label: 'Copy path',
       icon: <ClipboardCopy size={15} strokeWidth={1.75} />,
@@ -310,11 +315,7 @@ const Navigator = ({ tiles, frames, activeTile, activeDiff, alerts, agents, hand
         />
       )}
 
-      <div
-        className={styles.body}
-        onContextMenu={openBlankMenu}
-        style={{ display: tab === 'files' ? undefined : 'none' }}
-      >
+      <div className={styles.body} onContextMenu={openBlankMenu} style={{ display: tab === 'files' ? undefined : 'none' }}>
         {tab === 'files' &&
           (root ? (
             <FileTree key={root} root={root} query={needle} creating={creating} handlers={fileTreeHandlers} />

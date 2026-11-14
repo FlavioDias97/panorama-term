@@ -227,7 +227,8 @@ const TilesTab = ({ tiles, query, frames, signals, activeTile, handlers }: Tiles
     const pool = scope === 'attention' ? tiles.filter((t) => statusOf(t)) : tiles;
     const sorted = pool.filter(matches).sort(scope === 'attention' ? urgency : recency);
     if (!tiles.length) return null;
-    if (!sorted.length) return <div className={styles.empty}>{scope === 'attention' ? 'Nothing needs you' : 'No tiles match'}</div>;
+    if (!sorted.length)
+      return <div className={styles.empty}>{scope === 'attention' ? 'Nothing needs you' : 'No tiles match'}</div>;
     return <div className={styles.cards}>{sorted.map((tile) => card(tile, true))}</div>;
   };
 
@@ -242,7 +243,13 @@ const TilesTab = ({ tiles, query, frames, signals, activeTile, handlers }: Tiles
       <div className={styles.bar}>
         <div className={styles.scopes} role="group" aria-label="Group tiles">
           {SCOPES.map((s) => (
-            <button key={s} className={styles.scope} onClick={() => pickScope(s)} aria-pressed={scope === s} data-active={scope === s || undefined}>
+            <button
+              key={s}
+              className={styles.scope}
+              onClick={() => pickScope(s)}
+              aria-pressed={scope === s}
+              data-active={scope === s || undefined}
+            >
               {scopeLabel(s)}
             </button>
           ))}

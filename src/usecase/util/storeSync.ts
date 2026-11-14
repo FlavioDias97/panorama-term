@@ -33,5 +33,19 @@ export const createDeferredReload = (reload: (names: string[]) => void) => {
 
 export const shouldPersist = (
   applied: { tiles: unknown; frames: unknown },
-  current: { tiles: unknown; frames: unknown }
-): boolean => applied.tiles !== current.tiles || applied.frames !== current.frames;
+  current: { tiles: unknown; frames: unknown },
+  remote = true
+): boolean => !remote || applied.tiles !== current.tiles || applied.frames !== current.frames;
+
+export const listenPointerInteraction = (target: Window, start: (event: PointerEvent) => void, end: () => void): (() => void) => {
+  target.addEventListener('pointerdown', start, true);
+  target.addEventListener('pointerup', end, true);
+  target.addEventListener('pointercancel', end, true);
+  target.addEventListener('blur', end);
+  return () => {
+    target.removeEventListener('pointerdown', start, true);
+    target.removeEventListener('pointerup', end, true);
+    target.removeEventListener('pointercancel', end, true);
+    target.removeEventListener('blur', end);
+  };
+};

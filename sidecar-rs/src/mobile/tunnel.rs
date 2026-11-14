@@ -23,12 +23,7 @@ fn control(id: u64, op: &str) -> Vec<u8> {
     v.extend_from_slice(json!({"t":"stream","id":id,"op":op}).to_string().as_bytes());
     v
 }
-#[allow(dead_code)]
-pub fn send_control(out: &Out, value: Value) -> Result<(), ()> {
-    let mut v = vec![0];
-    v.extend_from_slice(value.to_string().as_bytes());
-    out.try_send(v).map_err(|_| ())
-}
+
 impl Mux {
     pub fn sent(&mut self, plain: &[u8]) {
         if plain.first() == Some(&0) {

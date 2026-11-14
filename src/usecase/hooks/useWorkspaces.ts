@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { storeOrigin } from '~/adapter/store/store.client';
 import { isRemote } from '~/adapter/transport';
 import { remoteStatus } from '~/adapter/remote/remote.client';
-import { createDeferredReload, shouldReload, type StoreChange } from '~/usecase/util/storeSync';
+import { createDeferredReload, listenPointerInteraction, shouldReload, type StoreChange } from '~/usecase/util/storeSync';
 
 import type { TabMeta, CanvasState, WorkspaceMeta } from '~/domain/interfaces/workspace.interface';
 import { clearTabAlerts } from '~/usecase/util/alerts';
@@ -64,12 +64,11 @@ export const useWorkspaces = () => {
         })
         .catch(console.error);
     });
-    const down = () => deferred.start();
-    const up = () => deferred.end();
-    window.addEventListener('pointerdown', down, true);
-    window.addEventListener('pointerup', up, true);
-    window.addEventListener('blur', up);
-    window.addEventListener('pointercancel', up, true);
+    const stopPointer = listenPointerInteraction(
+      window,
+      () => deferred.start(),
+      () => deferred.end()
+    );
     const off = listen<StoreChange>('store:changed', ({ payload }) => {
       if (shouldReload(payload, storeOrigin)) deferred.change(payload.name);
     });
@@ -83,10 +82,7 @@ export const useWorkspaces = () => {
     }
     return () => {
       alive = false;
-      window.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('pointerup', up, true);
-      window.removeEventListener('blur', up);
-      window.removeEventListener('pointercancel', up, true);
+      stopPointer();
       void off.then((unlisten) => unlisten());
       void offResync.then((unlisten) => unlisten());
     };

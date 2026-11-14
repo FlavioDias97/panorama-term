@@ -28,13 +28,19 @@ use sha2::{Digest, Sha512};
 #[cfg(test)]
 use wire::{nonce, DIR_CLIENT};
 use wire::{session_key, Channel};
+use crate::local_origins::LOCAL_ORIGINS;
 
-#[allow(dead_code)]
 mod desktop_routes;
 mod presence;
 mod prompt;
 mod relay;
-pub(crate) use desktop_routes::pty_message_allowed as remote_pty_message_allowed;
+// Remote displays may send input, but the host owns the PTY dimensions.
+pub(crate) fn remote_pty_message_allowed(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|message| message.get("t").and_then(|t| t.as_str()).map(str::to_owned))
+        .is_some_and(|kind| kind != "resize")
+}
 
 pub use prompt::{wait as wait_prompt, Wait as PromptWait};
 
@@ -58,13 +64,7 @@ const PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 const PUSH_CHANNEL: &str = "agent";
 const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 const PUSH_TOKEN_PREFIXES: &[&str] = &["ExponentPushToken[", "ExpoPushToken["];
-const LOCAL_ORIGINS: &[&str] = &[
-    "tauri://localhost",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-    "http://localhost:1471",
-    "http://127.0.0.1:1471",
-];
+
 
 type Tx = Pin<Box<dyn Sink<Message, Error = WsError> + Send>>;
 type Rx = Pin<Box<dyn Stream<Item = Result<Message, WsError>> + Send>>;
@@ -477,6 +477,10 @@ fn pairing_allowed(
         && codes_match(expected, &code.to_ascii_uppercase())
 }
 
+fn desktop_allowed(id: &str) -> bool {
+    state().devices.iter().any(|d| d.id == id && d.desktop)
+}
+
 fn pair_device(public_key: [u8; 32], code: &str, name: &str, desktop: bool) -> Option<String> {
     let mut st = state();
     let (expected, expires, granted) = st.pairing.clone()?;
@@ -555,7 +559,7 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx) -> Option<(Channel, String)> {
         &client_nonce,
         &server_nonce,
     )?;
-    let mut chan = Channel::server(&key);
+    let mut chan = Channel::new(&key, 1 - wire::DIR_CLIENT);
     let Message::Binary(first) = next_data(rx).await? else {
         return None;
     };
@@ -1067,11 +1071,7 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
     match method {
         "ping" => Ok(json!({})),
         "host.call" => {
-            if !state()
-                .devices
-                .iter()
-                .any(|d| d.id == subs.device_id && d.desktop)
-            {
+            if !desktop_allowed(&subs.device_id) {
                 return Err("Desktop capability required".into());
             }
             crate::service_bridge::call(
@@ -1080,16 +1080,7 @@ async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, Str
             )
             .await
         }
-        "desktop.store_read" => {
-            if !state()
-                .devices
-                .iter()
-                .any(|d| d.id == subs.device_id && d.desktop)
-            {
-                return Err("Desktop capability required".into());
-            }
-            crate::service_bridge::call("store_read", json!({"name": str_param(p, "name")?})).await
-        }
+
         "tiles.list" => Ok(tiles_json()),
         "tile.open" => ui::open_tile(str_param(p, "cwd")?, p["agent"].as_str()),
         "run.list" => run_overview(str_param(p, "tileId")?).await,
@@ -1321,7 +1312,10 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
             }
             event = host_events.recv(), if subscribed => {
                 let Some(event) = event_or_resync(event) else { break };
-                if send_json(&mut tx, &mut chan, &json!({"t":"host.event", "event":event["event"], "payload":event["payload"]})).await.is_err() { break; }
+                let message = json!({
+                    "t": "host.event", "event": event["event"], "payload": event["payload"]
+                });
+                if send_json(&mut tx, &mut chan, &message).await.is_err() { break; }
             }
             Some(plain) = stream_rx.recv() => {
                 mux.sent(&plain);
@@ -1336,12 +1330,12 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                     if plain.first() == Some(&2) { if !mux.handle(&plain) { break; } continue; }
                     let Some(req) = parse_json(&plain) else { continue; };
                     if req["t"] == "stream" {
-                        if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) { break; }
+                        if !desktop_allowed(&subs.device_id) { break; }
                         if req["op"] == "open" { desktop_tunnel::open(&req, &mut mux, &stream_tx).await; }
                         else if !mux.handle(&plain) { break; }
                         continue;
                     }
-                    if req["m"] == "host.call" && state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                    if req["m"] == "host.call" && desktop_allowed(&subs.device_id) {
                         let out = stream_tx.clone();
                         tokio::spawn(async move {
                             let result = match req["p"]["command"].as_str() {
@@ -1358,7 +1352,7 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                         });
                         continue;
                     }
-                    let reply = if req["m"] == "host.subscribe" && state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                    let reply = if req["m"] == "host.subscribe" && desktop_allowed(&subs.device_id) {
                         subscribed = true;
                         json!({"t":"res", "id":req["id"], "ok":true, "r":null})
                     } else { reply_for(&req, &mut subs).await };
@@ -1417,7 +1411,7 @@ mod tests {
     #[test]
     fn channel_round_trips_and_rejects_replay() {
         let key = [7u8; 32];
-        let mut server = Channel::server(&key);
+        let mut server = Channel::new(&key, 1 - wire::DIR_CLIENT);
         let client = XSalsa20Poly1305::new((&key).into());
         let sealed = client
             .encrypt(&nonce(DIR_CLIENT, 0), b"\x00{}".as_slice())
@@ -1496,6 +1490,13 @@ mod tests {
             unregistered_tokens(&messages, &tickets),
             vec!["ExpoPushToken[b]".to_string()]
         );
+    }
+
+    #[test]
+    fn remote_terminal_rejects_resize() {
+        assert!(!remote_pty_message_allowed(r#"{"t":"resize"}"#));
+        assert!(remote_pty_message_allowed(r#"{"t":"in","d":"hello"}"#));
+        assert!(!remote_pty_message_allowed("invalid"));
     }
 
     #[test]

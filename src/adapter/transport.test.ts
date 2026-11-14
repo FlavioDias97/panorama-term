@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createTransport } from './transport';
+import { createTransport, hostCommands } from './transport';
 
 describe('transport', () => {
   test('local calls invoke directly, remote routes host commands and keeps local commands local', async () => {
@@ -31,14 +31,15 @@ describe('transport', () => {
     ]);
     expect(calls[9]).toEqual(['remote_invoke', { command: 'store_read', args: { name: 'workspaces.json' } }]);
   });
-  test('converts remote bytes and splits mixed store writes', async () => {
+  test('returns raw remote bytes and splits mixed store writes', async () => {
     const calls: unknown[][] = [];
     const invoke = ((...args: unknown[]) => {
       calls.push(args);
-      return Promise.resolve([0, 255]);
+      return Promise.resolve(new Uint8Array([0, 255]).buffer);
     }) as typeof import('@tauri-apps/api/core').invoke;
     const call = createTransport(invoke, () => true);
     expect([...new Uint8Array(await call<ArrayBuffer>('read_file_bytes', { path: '/file' }))]).toEqual([0, 255]);
+    expect(calls[0]).toEqual(['remote_invoke_bytes', { command: 'read_file_bytes', args: { path: '/file' } }]);
     await call('store_write_many', {
       entries: [
         { name: 'config.json', value: 1 },
@@ -51,4 +52,13 @@ describe('transport', () => {
       { command: 'store_write_many', args: { entries: [{ name: 'workspaces/a', value: 2 }] } }
     ]);
   });
+});
+
+test('host command list matches the Rust dispatcher', async () => {
+  const source = await Bun.file('src-tauri/src/service_bridge.rs').text();
+  const dispatch = source.slice(source.indexOf('pub async fn dispatch('), source.indexOf('async fn cleanup('));
+  const rust = new Set([...dispatch.matchAll(/"([a-z][a-z0-9_]+)"\s*(?:\||=>)/g)].map((m) => m[1]!));
+  for (const command of ['store_read', 'store_write', 'store_write_many', 'store_delete', 'store_list', 'read_bytes_chunk'])
+    rust.delete(command);
+  expect([...hostCommands].sort()).toEqual([...rust].sort());
 });

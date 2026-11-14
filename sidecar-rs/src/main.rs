@@ -1,3 +1,5 @@
+mod local_origins;
+mod config_dir;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -1258,13 +1260,13 @@ fn flush_session(s: &Session) {
 }
 
 fn shared_panorama_dir() -> Option<std::path::PathBuf> {
-    if let Some(dir) = std::env::var_os("PANORAMA_CONFIG_DIR") {
-        return Some(dir.into());
-    }
-    let home = std::env::var("USERPROFILE")
-        .ok()
-        .or_else(|| std::env::var("HOME").ok())?;
-    Some(Path::new(&home).join(".panorama"))
+    config_dir::config_dir(
+        std::env::var_os("PANORAMA_CONFIG_DIR").map(Into::into),
+        std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(Into::into),
+        ".panorama",
+    )
 }
 
 fn panorama_dir() -> Option<std::path::PathBuf> {
@@ -3971,14 +3973,8 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
         }
     }
     let mut seen_dirty = session.dirty.load(Ordering::Relaxed);
-    if !params.watch_only {
-        if tx
-            .send(Message::Binary(build_frame(&session)))
-            .await
-            .is_err()
-        {
-            return;
-        }
+    if !params.watch_only && tx.send(Message::Binary(build_frame(&session))).await.is_err() {
+        return;
     }
 
     let mut tick = tokio::time::interval(Duration::from_millis(if params.remote { 10 } else { 60 }));
@@ -4060,7 +4056,11 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
             }
             msg = rx.next() => {
                 match msg {
-                    Some(Ok(Message::Text(t))) => { if !params.remote || mobile::remote_pty_message_allowed(&t) { handle_client_msg(&session, &t); } },
+                    Some(Ok(Message::Text(t))) => {
+                        if !params.remote || mobile::remote_pty_message_allowed(&t) {
+                            handle_client_msg(&session, &t);
+                        }
+                    },
                     Some(Ok(Message::Binary(b))) => {
                         host_handle().write(&session.tile_id, &b);
                     }

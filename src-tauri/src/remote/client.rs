@@ -206,7 +206,7 @@ pub(super) async fn handshake(
                 &server_nonce,
             )
             .ok_or("Invalid host key")?;
-            let mut channel = Channel::client(&key);
+            let mut channel = Channel::new(&key, super::wire::DIR_CLIENT);
             send(&mut ws, &mut channel, intro.clone()).await?;
             let welcome = receive(&mut ws, &mut channel).await?;
             if welcome["t"] != "welcome" || welcome["v"] != 1 {
