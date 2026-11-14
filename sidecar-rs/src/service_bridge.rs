@@ -66,6 +66,10 @@ fn disconnect(generation: u64) {
 // Internal API for the desktop transport; it is not exposed as an HTTP route.
 #[allow(dead_code)]
 pub async fn call(command: &str, args: Value) -> Result<Value, String> {
+    call_with_timeout(command, args, std::time::Duration::from_secs(60)).await
+}
+
+async fn call_with_timeout(command: &str, args: Value, timeout: std::time::Duration) -> Result<Value, String> {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (reply, rx) = oneshot::channel();
     let tx = {
@@ -74,13 +78,12 @@ pub async fn call(command: &str, args: Value) -> Result<Value, String> {
         state.pending.insert(id, reply);
         tx
     };
-    if tx.send(json!({"id": id, "command": command, "args": args})).await.is_err() {
-        state().lock().unwrap().pending.remove(&id);
-        return Err("Host app unavailable".into());
-    }
-    let result = tokio::time::timeout(std::time::Duration::from_secs(60), rx).await;
+    let result = tokio::time::timeout(timeout, async {
+        tx.send(json!({"id": id, "command": command, "args": args})).await.map_err(|_| "Host app unavailable".to_string())?;
+        rx.await.map_err(|_| "Host app unavailable".to_string())?
+    }).await;
     state().lock().unwrap().pending.remove(&id);
-    result.map_err(|_| "Host service request timed out".to_string())?.map_err(|_| "Host app unavailable".to_string())?
+    result.map_err(|_| "Host service request timed out".to_string())?
 }
 #[allow(dead_code)]
 pub fn subscribe() -> broadcast::Receiver<Value> { events().subscribe() }
@@ -168,5 +171,11 @@ mod tests {
         client.close(None).await.unwrap();
         server.await.unwrap();
         assert_eq!(call("store_read", json!({})).await.unwrap_err(), "Host app unavailable");
+        let (tx, _rx) = mpsc::channel(1);
+        tx.send(json!({})).await.unwrap();
+        let generation = replace(tx);
+        assert_eq!(call_with_timeout("store_read", json!({}), std::time::Duration::from_millis(10)).await.unwrap_err(), "Host service request timed out");
+        assert!(state().lock().unwrap().pending.is_empty());
+        disconnect(generation);
     }
 }
