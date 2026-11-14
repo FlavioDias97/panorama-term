@@ -65,6 +65,7 @@ struct Device {
     public_key: [u8; 32],
     paired_at: u64,
     push_token: Option<String>,
+    desktop: bool,
 }
 
 struct State {
@@ -72,7 +73,7 @@ struct State {
     remote: bool,
     secret: StaticSecret,
     devices: Vec<Device>,
-    pairing: Option<(String, Instant)>,
+    pairing: Option<(String, Instant, bool)>,
     listener: Option<tokio::task::AbortHandle>,
     relay: Option<tokio::task::AbortHandle>,
 }
@@ -149,6 +150,7 @@ fn load_state() -> State {
                         public_key: decode_fixed(d["publicKey"].as_str()?)?,
                         paired_at: d["pairedAt"].as_u64().unwrap_or(0),
                         push_token: d["pushToken"].as_str().map(str::to_string),
+                        desktop: d["desktop"].as_bool().unwrap_or(false),
                     })
                 })
                 .collect()
@@ -186,6 +188,7 @@ fn save_state(st: &State) {
                 "publicKey": b64().encode(d.public_key),
                 "pairedAt": d.paired_at,
                 "pushToken": d.push_token,
+                "desktop": d.desktop,
             })
         })
         .collect();
@@ -304,7 +307,7 @@ fn state_json(st: &State) -> Value {
     let devices: Vec<Value> = st
         .devices
         .iter()
-        .map(|d| json!({ "id": d.id, "name": d.name, "pairedAt": d.paired_at }))
+        .map(|d| json!({ "id": d.id, "name": d.name, "pairedAt": d.paired_at, "desktop": d.desktop }))
         .collect();
     json!({
         "enabled": st.enabled,
@@ -340,7 +343,7 @@ fn set_remote(on: bool) -> Value {
     state_json(&st)
 }
 
-fn start_pairing() -> Value {
+fn start_pairing(desktop: bool) -> Value {
     let mut st = state();
     if !st.enabled {
         st.enabled = true;
@@ -348,7 +351,7 @@ fn start_pairing() -> Value {
     }
     start_listener(&mut st);
     let code = hex(&random_bytes::<8>());
-    st.pairing = Some((code.clone(), Instant::now() + PAIRING_TTL));
+    st.pairing = Some((code.clone(), Instant::now() + PAIRING_TTL, desktop));
     let hosts = lan_addresses().join(",");
     let uri = format!(
         "panorama-mobile://pair?v={PROTOCOL_VERSION}&k={}&c={code}&n={}&h={}",
@@ -384,7 +387,7 @@ pub fn local_route(path: &str, query: &HashMap<String, String>, origin: Option<&
         "state" => state_json(&state()),
         "enable" => set_enabled(query.get("on").map(|v| v == "1").unwrap_or(false)),
         "remote" => set_remote(query.get("on").map(|v| v == "1").unwrap_or(false)),
-        "pair" => start_pairing(),
+        "pair" => start_pairing(query.get("desktop").map(|v| v == "1").unwrap_or(false)),
         "cancel" => {
             let mut st = state();
             st.pairing = None;
@@ -488,15 +491,19 @@ fn codes_match(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn pair_device(public_key: [u8; 32], code: &str, name: &str) -> Option<String> {
+fn pairing_allowed(expected: &str, expires: Instant, granted: bool, code: &str, desktop: bool) -> bool {
+    Instant::now() < expires && desktop == granted && codes_match(expected, &code.to_ascii_uppercase())
+}
+
+fn pair_device(public_key: [u8; 32], code: &str, name: &str, desktop: bool) -> Option<String> {
     let mut st = state();
-    let (expected, expires) = st.pairing.clone()?;
-    if Instant::now() > expires || !codes_match(&expected, &code.to_ascii_uppercase()) {
+    let (expected, expires, granted) = st.pairing.clone()?;
+    if !pairing_allowed(&expected, expires, granted, code, desktop) {
         return None;
     }
     st.pairing = None;
     if let Some(known) = st.devices.iter().find(|d| d.public_key == public_key) {
-        return Some(known.id.clone());
+        return (known.desktop == desktop).then(|| known.id.clone());
     }
     let device = Device {
         id: hex(&random_bytes::<8>()),
@@ -504,6 +511,7 @@ fn pair_device(public_key: [u8; 32], code: &str, name: &str) -> Option<String> {
         public_key,
         paired_at: now_ms(),
         push_token: None,
+        desktop,
     };
     let id = device.id.clone();
     st.devices.push(device);
@@ -568,6 +576,7 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx) -> Option<(Channel, String)> {
             client_pk,
             intro["code"].as_str().unwrap_or_default(),
             intro["name"].as_str().unwrap_or("Phone"),
+            intro["capability"].as_str() == Some("desktop"),
         ),
         Some("auth") => authorize(&client_pk),
         _ => None,
@@ -1032,6 +1041,12 @@ fn stop_run(tile_id: &str, kind: &str) {
 async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, String> {
     match method {
         "ping" => Ok(json!({})),
+        "desktop.store_read" => {
+            if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                return Err("Desktop capability required".into());
+            }
+            crate::service_bridge::call("store_read", json!({"name": str_param(p, "name")?})).await
+        },
         "tiles.list" => Ok(tiles_json()),
         "tile.open" => ui::open_tile(str_param(p, "cwd")?, p["agent"].as_str()),
         "run.list" => run_overview(str_param(p, "tileId")?).await,
@@ -1219,6 +1234,7 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
             }
             msg = rx.next() => match msg {
                 Some(Ok(Message::Binary(sealed))) => {
+                    if !device_active(&subs.device_id) { break; }
                     let Some(plain) = chan.open(&sealed) else {
                         break;
                     };
@@ -1319,6 +1335,18 @@ mod tests {
             { "status": "error", "details": { "error": "DeviceNotRegistered" } },
         ] });
         assert_eq!(unregistered_tokens(&messages, &tickets), vec!["ExpoPushToken[b]".to_string()]);
+    }
+
+    #[test]
+    fn desktop_pairing_requires_explicit_matching_grant_and_live_code() {
+        let future = Instant::now() + Duration::from_secs(10);
+        let past = Instant::now() - Duration::from_secs(1);
+        assert!(pairing_allowed("AB12", future, false, "ab12", false));
+        assert!(pairing_allowed("AB12", future, true, "AB12", true));
+        assert!(!pairing_allowed("AB12", future, false, "AB12", true));
+        assert!(!pairing_allowed("AB12", future, true, "AB12", false));
+        assert!(!pairing_allowed("AB12", past, true, "AB12", true));
+        assert!(!pairing_allowed("AB12", future, true, "wrong", true));
     }
 
     #[test]
