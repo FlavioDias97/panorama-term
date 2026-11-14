@@ -1257,6 +1257,9 @@ fn flush_session(s: &Session) {
 }
 
 fn shared_panorama_dir() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("PANORAMA_CONFIG_DIR") {
+        return Some(dir.into());
+    }
     let home = std::env::var("USERPROFILE")
         .ok()
         .or_else(|| std::env::var("HOME").ok())?;
@@ -1265,10 +1268,20 @@ fn shared_panorama_dir() -> Option<std::path::PathBuf> {
 
 fn panorama_dir() -> Option<std::path::PathBuf> {
     let dir = shared_panorama_dir()?;
-    if cfg!(debug_assertions) {
-        return Some(dir.with_file_name(".panorama-dev"));
-    }
-    Some(dir)
+    Some(instance_dir(dir, std::env::var_os("PANORAMA_CONFIG_DIR").is_some(), cfg!(debug_assertions)))
+}
+
+fn instance_dir(dir: std::path::PathBuf, overridden: bool, debug: bool) -> std::path::PathBuf {
+    if debug && !overridden { dir.with_file_name(".panorama-dev") } else { dir }
+}
+
+#[test]
+fn instance_directories_preserve_defaults_and_overrides() {
+    let dir = std::path::PathBuf::from("/home/user/.panorama");
+    assert_eq!(instance_dir(dir.clone(), false, false), dir);
+    assert_eq!(instance_dir(dir.clone(), false, true), Path::new("/home/user/.panorama-dev"));
+    assert_eq!(instance_dir(Path::new("/tmp/panorama-host").into(), true, true), Path::new("/tmp/panorama-host"));
+    assert_eq!(instance_dir(Path::new("/tmp/panorama-client").into(), true, true), Path::new("/tmp/panorama-client"));
 }
 
 fn sanitize_key(key: &str) -> String {
@@ -2245,11 +2258,7 @@ fn agent_event_body(event: &str, evt: &serde_json::Value) -> Option<serde_json::
         return None;
     }
     let cwd = field("cwd");
-    let project = Path::new(&cwd)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string();
+    let project = cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("").to_string();
 
     let mut payload = serde_json::json!({
         "v": 1,

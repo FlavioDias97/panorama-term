@@ -1,6 +1,13 @@
-export const SIDECAR_PORT = import.meta.env.DEV ? 9877 : 9777;
-export const SIDECAR_HTTP = `http://127.0.0.1:${SIDECAR_PORT}`;
-export const SIDECAR_WS = `ws://127.0.0.1:${SIDECAR_PORT}`;
+import { invoke } from '@tauri-apps/api/core';
+
+export let SIDECAR_HTTP = '';
+export let SIDECAR_WS = '';
+
+export const initSidecar = async (getPort: () => Promise<number> = () => invoke('sidecar_endpoint')): Promise<void> => {
+  const port = await getPort();
+  SIDECAR_HTTP = `http://127.0.0.1:${port}`;
+  SIDECAR_WS = `ws://127.0.0.1:${port}`;
+};
 
 export const killPtySession = (tileId: string): Promise<unknown> =>
   fetch(`${SIDECAR_HTTP}/kill?tileId=${encodeURIComponent(tileId)}`).catch(() => undefined);

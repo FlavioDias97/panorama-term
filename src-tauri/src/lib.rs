@@ -58,20 +58,34 @@ where
 
 const SIDECAR_PORT: u16 = if cfg!(debug_assertions) { 9877 } else { 9777 };
 const HOST_PORT: u16 = if cfg!(debug_assertions) { 9878 } else { 9778 };
+fn configured_port(value: Option<&str>, default: u16) -> u16 {
+    value.and_then(|v| v.parse::<u16>().ok()).filter(|p| *p != 0).unwrap_or(default)
+}
+
+fn sidecar_port() -> u16 {
+    configured_port(std::env::var("PANORAMA_SIDECAR_PORT").ok().as_deref(), SIDECAR_PORT)
+}
+
+fn host_port() -> u16 {
+    configured_port(std::env::var("PANORAMA_HOST_PORT").ok().as_deref(), HOST_PORT)
+}
+
+#[tauri::command]
+fn sidecar_endpoint() -> u16 { sidecar_port() }
 const NOTIF_WIDTH: f64 = 448.0;
 // The overlay swallows clicks even on transparent pixels, so it must not cover the main
 // window's 24px status bar.
 const NOTIF_BOTTOM_GAP: f64 = 24.0;
 
 fn host_alive() -> bool {
-    let addr = format!("127.0.0.1:{HOST_PORT}").parse().unwrap();
+    let addr = format!("127.0.0.1:{}", host_port()).parse().unwrap();
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 // the host never runs from the installed binary, so an update can replace it without killing live PTYs
 fn host_bin(brain: &Path) -> PathBuf {
     let dir_name = if cfg!(debug_assertions) { "panorama-host-dev" } else { "panorama-host" };
-    let dir = std::env::temp_dir().join(dir_name);
+    let dir = std::env::temp_dir().join(host_dir_name(dir_name, std::env::var("PANORAMA_HOST_PORT").ok().as_deref()));
     if std::fs::create_dir_all(&dir).is_err() {
         return brain.to_path_buf();
     }
@@ -84,6 +98,13 @@ fn host_bin(brain: &Path) -> PathBuf {
         std::thread::sleep(Duration::from_millis(100));
     }
     brain.to_path_buf()
+}
+
+fn host_dir_name(default: &str, port: Option<&str>) -> String {
+    match port.and_then(|p| p.parse::<u16>().ok()).filter(|p| *p != 0) {
+        Some(port) => format!("{default}-{port}"),
+        None => default.to_string(),
+    }
 }
 
 // portable-pty loads conpty.dll from the host exe's own directory, and conpty.dll starts the
@@ -102,6 +123,9 @@ fn copy_conpty(brain: &Path, dir: &Path) {
 }
 
 fn host_record() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("PANORAMA_CONFIG_DIR") {
+        return Some(PathBuf::from(dir).join("host.json"));
+    }
     let name = if cfg!(debug_assertions) { ".panorama-dev" } else { ".panorama" };
     Some(dirs::home_dir()?.join(name).join("host.json"))
 }
@@ -164,8 +188,8 @@ fn spawn_sidecar() {
         let mut cmd = Command::new(&host);
         cmd.arg("host")
             .env("PANORAMA_BRAIN_BIN", &bin)
-            .env("PANORAMA_HOST_PORT", HOST_PORT.to_string())
-            .env("PANORAMA_SIDECAR_PORT", SIDECAR_PORT.to_string())
+            .env("PANORAMA_HOST_PORT", host_port().to_string())
+            .env("PANORAMA_SIDECAR_PORT", sidecar_port().to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -845,6 +869,10 @@ pub fn run() {
         );
     }
 
+    let mut context = tauri::generate_context!();
+    if let Ok(id) = std::env::var("PANORAMA_INSTANCE_ID") {
+        context.config_mut().identifier = id;
+    }
     builder
         .setup(|app| {
             if let Err(err) = store::init() {
@@ -875,6 +903,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            sidecar_endpoint,
             write_temp_image,
             read_temp_image,
             has_clipboard_image,
@@ -952,6 +981,22 @@ pub fn run() {
             ide::detect_ides,
             ide::open_in_ide
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::*;
+    #[test]
+    fn ports_use_defaults_and_overrides() {
+        assert_eq!(configured_port(None, SIDECAR_PORT), if cfg!(debug_assertions) { 9877 } else { 9777 });
+        assert_eq!(configured_port(None, HOST_PORT), if cfg!(debug_assertions) { 9878 } else { 9778 });
+        assert_eq!(configured_port(Some("19877"), SIDECAR_PORT), 19877);
+        assert_eq!(configured_port(Some("bad"), HOST_PORT), HOST_PORT);
+        assert_eq!(configured_port(Some("0"), HOST_PORT), HOST_PORT);
+        assert_eq!(host_dir_name("panorama-host-dev", None), "panorama-host-dev");
+        assert_eq!(host_dir_name("panorama-host-dev", Some("19878")), "panorama-host-dev-19878");
+        assert_eq!(host_dir_name("panorama-host-dev", Some("bad")), "panorama-host-dev");
+    }
 }
