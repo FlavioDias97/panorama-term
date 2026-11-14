@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { invoke as hostInvoke, isRemote } from '~/adapter/transport';
 
 export const writeClipboard = (text: string): void => {
   navigator.clipboard?.writeText(text).catch(() => {});
@@ -35,10 +36,22 @@ export const writeTempImage = async (blob: Blob, token: string): Promise<string>
   const ext = MIME_EXT[blob.type];
   if (!ext) throw new Error(`unsupported image type: ${blob.type}`);
   const buf = await blob.arrayBuffer();
-  return invoke<string>('write_temp_image', buf, { headers: { 'x-image-name': `paste_${token}.${ext}` } });
+  const name = `paste_${token}.${ext}`;
+  if (!isRemote()) return invoke<string>('write_temp_image', buf, { headers: { 'x-image-name': name } });
+  const bytes = new Uint8Array(buf);
+  let path = '';
+  for (let offset = 0; offset < bytes.length || offset === 0; offset += 32768) {
+    path = await hostInvoke<string>('upload_image_chunk', {
+      name,
+      bytes: Array.from(bytes.subarray(offset, offset + 32768)),
+      first: offset === 0,
+      last: offset + 32768 >= bytes.length
+    });
+  }
+  return path;
 };
 
 export const readTempImage = async (path: string): Promise<string> => {
-  const buf = await invoke<ArrayBuffer>('read_temp_image', { path });
+  const buf = await hostInvoke<ArrayBuffer>('read_temp_image', { path });
   return URL.createObjectURL(new Blob([buf]));
 };

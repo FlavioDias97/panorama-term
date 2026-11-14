@@ -1179,6 +1179,8 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
     let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let mut mux = tunnel::Mux::new(stream_tx.clone());
     let mut tick = tokio::time::interval(FRAME_INTERVAL);
+    let mut host_events = crate::service_bridge::subscribe();
+    let mut subscribed = false;
     loop {
         tokio::select! {
             _ = tick.tick() => {
@@ -1187,6 +1189,11 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                     || push_chats(&mut tx, &mut chan, &mut subs).await.is_err()
                 {
                     break;
+                }
+            }
+            event = host_events.recv(), if subscribed => {
+                if let Ok(event) = event {
+                    if send_json(&mut tx, &mut chan, &json!({"t":"host.event", "event":event["event"], "payload":event["payload"]})).await.is_err() { break; }
                 }
             }
             Some(plain) = stream_rx.recv() => {
@@ -1207,7 +1214,10 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                         else if !mux.handle(&plain) { break; }
                         continue;
                     }
-                    let reply = reply_for(&req, &mut subs).await;
+                    let reply = if req["m"] == "host.subscribe" && state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                        subscribed = true;
+                        json!({"t":"res", "id":req["id"], "ok":true, "r":null})
+                    } else { reply_for(&req, &mut subs).await };
                     if !device_active(&subs.device_id) { break; }
                     if send_json(&mut tx, &mut chan, &reply).await.is_err() {
                         break;

@@ -120,6 +120,28 @@ impl Session {
         }
         Err(last)
     }
+    pub async fn subscribe(&mut self) -> Result<(), String> {
+        let (ws, channel) = self.connection.as_mut().ok_or("Connection closed")?;
+        send(ws, channel, json!({"m":"host.subscribe", "id":0})).await?;
+        let reply = receive(ws, channel).await?;
+        if reply["t"] == "res" && reply["ok"] == true { Ok(()) } else { Err("Subscription failed".into()) }
+    }
+    pub async fn next_event(&mut self) -> Result<Value, String> {
+        let (ws, channel) = self.connection.as_mut().ok_or("Connection closed")?;
+        loop { let event = receive(ws, channel).await?; if event["t"] == "host.event" { return Ok(event); } }
+    }
+    pub async fn call_bytes(&mut self, command: &str, args: Value) -> Result<Vec<u8>, String> {
+        let mut result = self.call(command, args).await?;
+        let mut bytes = Vec::new();
+        loop {
+            let chunk: Vec<u8> = serde_json::from_value(result["bytes"].clone()).map_err(|e| e.to_string())?;
+            bytes.extend(chunk);
+            match result["next"].as_str() {
+                Some(token) => result = self.call("read_bytes_chunk", json!({"token":token})).await?,
+                None => return Ok(bytes),
+            }
+        }
+    }
     pub async fn call(&mut self, command: &str, args: Value) -> Result<Value, String> {
         if self.connection.is_none() { self.reconnect().await?; }
         self.next_id += 1;

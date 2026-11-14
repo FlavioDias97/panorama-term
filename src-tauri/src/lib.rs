@@ -6,7 +6,7 @@ use std::time::Duration;
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub mod remote;
-mod service_bridge;
+pub mod service_bridge;
 mod git;
 mod store;
 mod docker;
@@ -72,10 +72,12 @@ fn host_port() -> u16 {
     configured_port(std::env::var("PANORAMA_HOST_PORT").ok().as_deref(), HOST_PORT)
 }
 
-static REMOTE_PROXY: std::sync::Mutex<Option<remote::Proxy>> = std::sync::Mutex::new(None);
+struct RemoteState { proxy: remote::Proxy, session: std::sync::Arc<tokio::sync::Mutex<remote::Session>>, events: tauri::async_runtime::JoinHandle<()> }
+impl Drop for RemoteState { fn drop(&mut self) { self.events.abort(); } }
+static REMOTE_PROXY: std::sync::Mutex<Option<RemoteState>> = std::sync::Mutex::new(None);
 #[tauri::command]
 fn sidecar_endpoint() -> String {
-    REMOTE_PROXY.lock().unwrap().as_ref().map(|p| p.endpoint.clone()).unwrap_or_else(|| format!("127.0.0.1:{}", sidecar_port()))
+    REMOTE_PROXY.lock().unwrap().as_ref().map(|p| p.proxy.endpoint.clone()).unwrap_or_else(|| format!("127.0.0.1:{}", sidecar_port()))
 }
 #[tauri::command]
 fn local_sidecar_endpoint() -> String { format!("127.0.0.1:{}", sidecar_port()) }
@@ -86,12 +88,40 @@ async fn remote_pair(app: tauri::AppHandle, uri: String, name: String) -> Result
 }
 #[tauri::command]
 async fn remote_connect(app: tauri::AppHandle) -> Result<String, String> {
-    let proxy = remote::start_proxy(&remote::Identity::load()?).await?;
+    let identity = remote::Identity::load()?;
+    let proxy = remote::start_proxy(&identity).await?;
+    let session = std::sync::Arc::new(tokio::sync::Mutex::new(remote::connect(&identity).await?));
+    let mut event_session = remote::connect(&identity).await?;
+    event_session.subscribe().await?;
+    let event_app = app.clone();
+    let events = tauri::async_runtime::spawn(async move {
+        loop {
+            match event_session.next_event().await {
+                Ok(event) => if let Some(name) = event["event"].as_str() {
+                    if ["git:repo", "diff:changed", "note:changed", "store:changed", "file:changed", "run:manifests"].contains(&name) { let _ = event_app.emit(name, event["payload"].clone()); }
+                },
+                Err(_) => loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    if let Ok(mut session) = remote::connect(&identity).await { if session.subscribe().await.is_ok() { event_session = session; break; } }
+                },
+            }
+        }
+    });
     let endpoint = proxy.endpoint.clone();
-    *REMOTE_PROXY.lock().unwrap() = Some(proxy);
+    *REMOTE_PROXY.lock().unwrap() = Some(RemoteState { proxy, session, events });
     let _ = app.emit("sidecar:endpoint", &endpoint);
     Ok(endpoint)
 }
+#[tauri::command]
+async fn remote_invoke(command: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let session = REMOTE_PROXY.lock().unwrap().as_ref().map(|state| state.session.clone()).ok_or("Remote host disconnected")?;
+    let mut session = session.lock().await;
+    if ["read_file_bytes", "git_blob", "read_temp_image"].contains(&command.as_str()) {
+        return serde_json::to_value(session.call_bytes(&command, args).await?).map_err(|e| e.to_string());
+    }
+    session.call(&command, args).await
+}
+
 #[tauri::command]
 fn remote_disconnect(app: tauri::AppHandle) {
     *REMOTE_PROXY.lock().unwrap() = None;
@@ -259,20 +289,17 @@ fn write_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String> 
         .get("x-image-name")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let safe: String = name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        .collect();
-    if safe.is_empty() {
-        return Err("invalid file name".into());
-    }
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw image body".into());
     };
+    save_temp_image(name, bytes)
+}
+
+fn save_temp_image(name: &str, bytes: &[u8]) -> Result<String, String> {
+    let safe: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')).collect();
+    if safe.is_empty() || safe != name || safe == "." || safe == ".." || bytes.len() > 5 * 1024 * 1024 { return Err("invalid image".into()); }
     let path = std::env::temp_dir().join("panorama-paste").join(safe);
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
+    if let Some(dir) = path.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -281,7 +308,7 @@ fn write_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String> 
 fn read_temp_image(path: String) -> Result<tauri::ipc::Response, String> {
     let base = std::env::temp_dir().join("panorama-paste");
     let target = PathBuf::from(&path);
-    if !target.starts_with(&base) {
+    if target.parent() != Some(base.as_path()) {
         return Err("path not allowed".into());
     }
     let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
@@ -935,6 +962,7 @@ pub fn run() {
             remote_pair,
             remote_connect,
             remote_disconnect,
+            remote_invoke,
             write_temp_image,
             read_temp_image,
             has_clipboard_image,

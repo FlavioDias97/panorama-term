@@ -1,11 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { setRemote } from '~/adapter/transport';
 
 export let SIDECAR_HTTP = '';
 export let SIDECAR_WS = '';
 export let LOCAL_SIDECAR_HTTP = '';
+let localEndpoint = '';
+let currentEndpoint = '';
 
 const setEndpoint = (endpoint: string): void => {
+  currentEndpoint = endpoint;
+  if (localEndpoint) setRemote(endpoint !== localEndpoint);
   SIDECAR_HTTP = `http://${endpoint}`;
   SIDECAR_WS = `ws://${endpoint}`;
 };
@@ -22,7 +27,9 @@ export const initSidecar = async (
     setEndpoint(endpoint);
   });
   const [endpoint, local] = await Promise.all([getEndpoint(), getLocalEndpoint()]);
+  localEndpoint = local;
   if (changes === 0) setEndpoint(endpoint);
+  else setRemote(currentEndpoint !== localEndpoint);
   LOCAL_SIDECAR_HTTP = `http://${local}`;
 };
 

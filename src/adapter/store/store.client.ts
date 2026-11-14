@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '~/adapter/transport';
 
 export const storeList = (dir: string): Promise<string[]> => invoke('store_list', { dir });
 

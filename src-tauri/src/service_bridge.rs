@@ -21,7 +21,7 @@ fn bytes(response: tauri::ipc::Response) -> Result<Vec<u8>, String> {
     }
 }
 
-pub(crate) async fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
+pub async fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
     match command {
         "store_read" => value(crate::store::store_read(arg(args, "name")?)?),
         "store_write" => value(crate::store::store_write(arg(args, "name")?, arg(args, "value")?)?),
@@ -83,9 +83,10 @@ pub(crate) async fn dispatch(command: &str, args: &Value) -> Result<Value, Strin
 }
 
 #[derive(Default)]
-struct Watches { git_files: Vec<u32>, repos: Vec<String>, files: Vec<u32>, runs: Vec<u32> }
+pub struct Watches { git_files: Vec<u32>, repos: Vec<String>, files: Vec<u32>, runs: Vec<u32>, chunks: std::collections::HashMap<String, std::vec::IntoIter<u8>>, uploads: std::collections::HashMap<String, Vec<u8>>, next: u64 }
 impl Watches {
     async fn dispatch(&mut self, app: &tauri::AppHandle, command: &str, args: &Value) -> Option<Result<Value, String>> {
+        if let Some(result) = self.data(command, args).await { return Some(result); }
         Some(match command {
             "git_watch_file" => match (|| Ok((arg(args, "path")?, arg(args, "file")?)))() {
                 Ok((path, file)) => match crate::git::git_watch_file(app.clone(), path, file).await { Ok(id) => { self.git_files.push(id); value(id) }, Err(e) => Err(e) }, Err(e) => Err(e),
@@ -103,6 +104,41 @@ impl Watches {
             "run_unwatch_manifests" => match arg(args, "id") { Ok(id) if take(&mut self.runs, &id) => { crate::run_unwatch_manifests(id); Ok(Value::Null) }, _ => Err("Unknown watch".into()) },
             _ => return None,
         })
+    }
+    pub async fn data(&mut self, command: &str, args: &Value) -> Option<Result<Value, String>> {
+        Some(match command {
+            "read_file_bytes" | "git_blob" | "read_temp_image" => {
+                let result = match command {
+                    "read_file_bytes" => arg(args, "path").and_then(crate::read_file_bytes).and_then(bytes),
+                    "read_temp_image" => arg(args, "path").and_then(crate::read_temp_image).and_then(bytes),
+                    _ => match (|| Ok((arg(args, "path")?, arg(args, "file")?, arg(args, "old")?, arg(args, "commit")?, arg(args, "base")?)))() {
+                        Ok((path, file, old, commit, base)) => crate::git::git_blob(path, file, old, commit, base).await.and_then(bytes), Err(e) => Err(e),
+                    }
+                };
+                match result { Ok(data) => { self.next += 1; let token = self.next.to_string(); self.chunks.insert(token.clone(), data.into_iter()); Ok(self.chunk(&token)) }, Err(e) => Err(e) }
+            },
+            "read_bytes_chunk" => match arg::<String>(args, "token") { Ok(token) if self.chunks.contains_key(&token) => Ok(self.chunk(&token)), _ => Err("Unknown byte stream".into()) },
+            "upload_image_chunk" => (|| {
+                let name: String = arg(args, "name")?;
+                let data: Vec<u8> = arg(args, "bytes")?;
+                let first: bool = arg(args, "first")?;
+                let last: bool = arg(args, "last")?;
+                if data.len() > 32768 { return Err("Image chunk too large".into()); }
+                if first { if self.uploads.len() >= 8 && !self.uploads.contains_key(&name) { return Err("Too many uploads".into()); } self.uploads.insert(name.clone(), Vec::new()); }
+                let upload = self.uploads.get_mut(&name).ok_or("Unknown upload")?;
+                if upload.len() + data.len() > 5 * 1024 * 1024 { self.uploads.remove(&name); return Err("Image too large".into()); }
+                upload.extend(data);
+                if last { let data = self.uploads.remove(&name).unwrap(); value(crate::save_temp_image(&name, &data)?) } else { Ok(Value::Null) }
+            })(),
+            _ => return None,
+        })
+    }
+    fn chunk(&mut self, token: &str) -> Value {
+        let iter = self.chunks.get_mut(token).unwrap();
+        let data: Vec<u8> = iter.by_ref().take(32768).collect();
+        let more = !iter.as_slice().is_empty();
+        if !more { self.chunks.remove(token); }
+        json!({"bytes": data, "next": if more { Some(token) } else { None }})
     }
     async fn cleanup(self) {
         for id in self.git_files { crate::git::git_unwatch_file(id).await; }
@@ -173,6 +209,26 @@ mod tests {
         assert!(take(&mut watches, &1));
         assert_eq!(watches, vec![1, 2]);
         assert!(!take(&mut watches, &3));
+    }
+    #[tokio::test]
+    async fn chunked_bytes_and_image_upload() {
+        let mut watches = Watches::default();
+        let name = format!("test-paste-{}.png", std::process::id());
+        let data = vec![42u8; 40000];
+        let first = watches.data("upload_image_chunk", &json!({"name":name,"bytes": &data[..32768],"first":true,"last":false})).await.unwrap().unwrap();
+        assert!(first.is_null());
+        let path = watches.data("upload_image_chunk", &json!({"name":name,"bytes": &data[32768..],"first":false,"last":true})).await.unwrap().unwrap();
+        let path = path.as_str().unwrap();
+        let first = watches.data("read_temp_image", &json!({"path":path})).await.unwrap().unwrap();
+        assert_eq!(first["bytes"].as_array().unwrap().len(), 32768);
+        let token = first["next"].as_str().unwrap();
+        let last = watches.data("read_bytes_chunk", &json!({"token":token})).await.unwrap().unwrap();
+        assert_eq!(last["bytes"].as_array().unwrap().len(), data.len() - 32768);
+        assert!(last["next"].is_null());
+        assert!(watches.data("read_bytes_chunk", &json!({"token":token})).await.unwrap().is_err());
+        assert!(watches.data("upload_image_chunk", &json!({"name":"../bad", "bytes":[], "first":true, "last":true})).await.unwrap().is_err());
+        assert!(watches.data("read_temp_image", &json!({"path":format!("{path}/../other")})).await.unwrap().is_err());
+        std::fs::remove_file(path).unwrap();
     }
     #[tokio::test]
     async fn real_git_and_bytes() {
