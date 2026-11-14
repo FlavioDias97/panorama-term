@@ -21,6 +21,8 @@ use x25519_dalek::{PublicKey, StaticSecret};
 mod presence;
 mod prompt;
 mod relay;
+#[allow(dead_code)]
+mod desktop_routes;
 
 pub use prompt::{wait as wait_prompt, Wait as PromptWait};
 
