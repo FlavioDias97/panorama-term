@@ -37,7 +37,7 @@ impl Identity {
     }
 }
 
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub(super) type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub struct Session { identity: Identity, connection: Option<(Socket, Channel)>, next_id: u64 }
 fn random<const N: usize>() -> Result<[u8; N], String> {
     let mut bytes = [0; N]; getrandom::getrandom(&mut bytes).map_err(|e| e.to_string())?; Ok(bytes)
@@ -73,7 +73,7 @@ async fn receive(ws: &mut Socket, channel: &mut Channel) -> Result<Value, String
         Some(Err(e)) => return Err(e.to_string()), _ => return Err("Connection closed".into()),
     }}
 }
-async fn handshake(identity: &Identity, intro: Value) -> Result<(Socket, Channel, Value), String> {
+pub(super) async fn handshake(identity: &Identity, intro: Value) -> Result<(Socket, Channel, Value), String> {
     let secret = StaticSecret::from(identity.secret);
     let public = PublicKey::from(&secret).to_bytes();
     let client_nonce: [u8; 24] = random()?;

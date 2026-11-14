@@ -1,12 +1,29 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export let SIDECAR_HTTP = '';
 export let SIDECAR_WS = '';
+export let LOCAL_SIDECAR_HTTP = '';
 
-export const initSidecar = async (getPort: () => Promise<number> = () => invoke('sidecar_endpoint')): Promise<void> => {
-  const port = await getPort();
-  SIDECAR_HTTP = `http://127.0.0.1:${port}`;
-  SIDECAR_WS = `ws://127.0.0.1:${port}`;
+const setEndpoint = (endpoint: string): void => {
+  SIDECAR_HTTP = `http://${endpoint}`;
+  SIDECAR_WS = `ws://${endpoint}`;
+};
+
+export const initSidecar = async (
+  getEndpoint: () => Promise<string> = () => invoke('sidecar_endpoint'),
+  getLocalEndpoint: () => Promise<string> = () => invoke('local_sidecar_endpoint'),
+  onEndpoint: (callback: (endpoint: string) => void) => Promise<unknown> = (callback) =>
+    listen<string>('sidecar:endpoint', (event) => callback(event.payload))
+): Promise<void> => {
+  let changes = 0;
+  await onEndpoint((endpoint) => {
+    changes++;
+    setEndpoint(endpoint);
+  });
+  const [endpoint, local] = await Promise.all([getEndpoint(), getLocalEndpoint()]);
+  if (changes === 0) setEndpoint(endpoint);
+  LOCAL_SIDECAR_HTTP = `http://${local}`;
 };
 
 export const killPtySession = (tileId: string): Promise<unknown> =>

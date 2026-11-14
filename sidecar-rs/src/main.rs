@@ -344,7 +344,7 @@ fn reconnect_sessions() {
             shell: key.clone(),
             pid,
             parser: Mutex::new(parser),
-            dirty: AtomicBool::new(true),
+            dirty: AtomicU64::new(1),
             parsed_total: AtomicU64::new(snap_total),
             flushed_total: AtomicU64::new(0),
             main_dirty: AtomicBool::new(true),
@@ -1129,7 +1129,7 @@ struct Session {
     shell: String,
     pid: u32,
     parser: Mutex<vt100::Parser<CwdSink>>,
-    dirty: AtomicBool,
+    dirty: AtomicU64,
     parsed_total: AtomicU64,
     flushed_total: AtomicU64,
     main_dirty: AtomicBool,
@@ -2855,6 +2855,7 @@ struct Params {
     run_kind: String,
     attach_only: bool,
     watch_only: bool,
+    remote: bool,
 }
 
 fn default_shell() -> String {
@@ -3164,7 +3165,7 @@ fn spawn_session(
         shell: p.spawn_cmd.clone().unwrap_or_else(|| shell.clone()),
         pid,
         parser: Mutex::new(parser),
-        dirty: AtomicBool::new(true),
+        dirty: AtomicU64::new(1),
         parsed_total: AtomicU64::new(seed.len() as u64),
         flushed_total: AtomicU64::new(0),
         main_dirty: AtomicBool::new(true),
@@ -3323,11 +3324,11 @@ fn run_consumer_loop(
                         run.log.lock().unwrap_or_else(|e| e.into_inner()).feed(text);
                     }
                 }
-                s.dirty.store(true, Ordering::Relaxed);
+                s.dirty.fetch_add(1, Ordering::Relaxed);
             }
             Ok(ConsumerMsg::Exit { code }) => {
                 s.exited.store(true, Ordering::Relaxed);
-                s.dirty.store(true, Ordering::Relaxed);
+                s.dirty.fetch_add(1, Ordering::Relaxed);
                 if let Some(run) = &s.run {
                     let mut exit = run.exit.lock().unwrap_or_else(|e| e.into_inner());
                     if exit.is_none() {
@@ -3342,7 +3343,7 @@ fn run_consumer_loop(
             }
             Err(_) => {
                 s.exited.store(true, Ordering::Relaxed);
-                s.dirty.store(true, Ordering::Relaxed);
+                s.dirty.fetch_add(1, Ordering::Relaxed);
                 flush_session(&s);
                 if s.run.is_none() {
                     forget_session(&s);
@@ -3407,7 +3408,7 @@ fn resize_session(s: &Session, cols: u16, rows: u16) {
         .unwrap_or_else(|e| e.into_inner())
         .screen_mut()
         .set_size(rows, cols);
-    s.dirty.store(true, Ordering::Relaxed);
+    s.dirty.fetch_add(1, Ordering::Relaxed);
 }
 
 fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
@@ -3466,7 +3467,7 @@ fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
         parser.screen().scrollback()
     };
     s.scrollback.store(actual, Ordering::Relaxed);
-    s.dirty.store(true, Ordering::Relaxed);
+    s.dirty.fetch_add(1, Ordering::Relaxed);
 }
 
 fn mouse_session(s: &Session, kind: u8, button: i64, col: usize, row: usize, mods: i64) {
@@ -3534,7 +3535,7 @@ fn forget_session(s: &Arc<Session>) {
 
 fn mark_killed(s: &Arc<Session>) {
     s.exited.store(true, Ordering::Relaxed);
-    s.dirty.store(true, Ordering::Relaxed);
+    s.dirty.fetch_add(1, Ordering::Relaxed);
     if let Some(run) = &s.run {
         let mut exit = run.exit.lock().unwrap_or_else(|e| e.into_inner());
         if exit.is_none() {
@@ -3554,7 +3555,7 @@ fn kill_session(s: &Arc<Session>) {
     }
     run.phase.store(RUN_PHASE_KILLING, Ordering::Relaxed);
     run.stopped_by_user.store(true, Ordering::Relaxed);
-    s.dirty.store(true, Ordering::Relaxed);
+    s.dirty.fetch_add(1, Ordering::Relaxed);
     host_handle().kill(&s.tile_id);
     let s = s.clone();
     std::thread::spawn(move || {
@@ -3648,6 +3649,7 @@ async fn run_start_json(kind: &str, tile: &str, cwd: &str, cmd: &str) -> String 
         run_kind: kind.to_string(),
         attach_only: false,
         watch_only: false,
+        remote: false,
     };
     match get_or_create(&params).await {
         Ok(_) => run_status_json(run_lookup_tile(kind, tile)),
@@ -3853,14 +3855,14 @@ fn send_to_tile(tile_id: &str, text: &str) -> Result<(), String> {
     }
     if let Some(s) = &session {
         s.scrollback.store(0, Ordering::Relaxed);
-        s.dirty.store(true, Ordering::Relaxed);
+        s.dirty.fetch_add(1, Ordering::Relaxed);
     }
     let tile_id = tile_id.to_string();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(150)).await;
         host_handle().write(&tile_id, b"\r");
         if let Some(s) = sessions().lock().unwrap().get(&tile_id) {
-            s.dirty.store(true, Ordering::Relaxed);
+            s.dirty.fetch_add(1, Ordering::Relaxed);
         }
     });
     Ok(())
@@ -3868,7 +3870,7 @@ fn send_to_tile(tile_id: &str, text: &str) -> Result<(), String> {
 
 fn write_input(s: &Arc<Session>, d: &str) {
     s.scrollback.store(0, Ordering::Relaxed);
-    s.dirty.store(true, Ordering::Relaxed);
+    s.dirty.fetch_add(1, Ordering::Relaxed);
     if d.contains('\r') || d.contains('\n') {
         let line = current_command_line(s);
         let mut cmd = s.cmd.lock().unwrap_or_else(|e| e.into_inner());
@@ -3920,7 +3922,7 @@ fn handle_client_msg(s: &Arc<Session>, text: &str) {
             let visible = v.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
             s.visible.store(visible, Ordering::Relaxed);
             if visible {
-                s.dirty.store(true, Ordering::Relaxed);
+                s.dirty.fetch_add(1, Ordering::Relaxed);
             }
         }
         Some("dismissAgent") => clear_binding_session(&s.tile_id),
@@ -3939,7 +3941,7 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
             return;
         }
     };
-    if !params.watch_only {
+    if !params.watch_only && !params.remote {
         resize_session(&session, params.cols, params.rows);
     }
 
@@ -3968,6 +3970,7 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
             return;
         }
     }
+    let mut seen_dirty = session.dirty.load(Ordering::Relaxed);
     if !params.watch_only {
         if tx
             .send(Message::Binary(build_frame(&session)))
@@ -3976,7 +3979,6 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
         {
             return;
         }
-        session.dirty.store(false, Ordering::Relaxed);
     }
 
     let mut tick = tokio::time::interval(Duration::from_millis(60));
@@ -4003,11 +4005,11 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
                 }
                 if !params.watch_only
                     && session.visible.load(Ordering::Relaxed)
-                    && session.dirty.load(Ordering::Relaxed)
+                    && session.dirty.load(Ordering::Relaxed) != seen_dirty
                     && (session.focused.load(Ordering::Relaxed)
                         || last_frame.elapsed() >= Duration::from_millis(UNFOCUSED_FRAME_MS))
                 {
-                    session.dirty.store(false, Ordering::Relaxed);
+                    seen_dirty = session.dirty.load(Ordering::Relaxed);
                     last_frame = tokio::time::Instant::now();
                     if tx.send(Message::Binary(build_frame(&session))).await.is_err() {
                         break;
@@ -4058,7 +4060,7 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
             }
             msg = rx.next() => {
                 match msg {
-                    Some(Ok(Message::Text(t))) => handle_client_msg(&session, &t),
+                    Some(Ok(Message::Text(t))) => { if !params.remote || mobile::remote_pty_message_allowed(&t) { handle_client_msg(&session, &t); } },
                     Some(Ok(Message::Binary(b))) => {
                         host_handle().write(&session.tile_id, &b);
                     }
@@ -4201,10 +4203,11 @@ async fn handle_conn(mut stream: TcpStream) {
             _ => return,
         };
         let watch_only = q.get("watch").map(|v| v == "1").unwrap_or(false);
+        let remote = headers.get("x-panorama-remote").is_some_and(|s| s == mobile::desktop_tunnel::secret());
         let params = Params {
             tile_id,
-            cols: q.get("cols").and_then(|c| c.parse().ok()).unwrap_or(80),
-            rows: q.get("rows").and_then(|r| r.parse().ok()).unwrap_or(24),
+            cols: if remote { 80 } else { q.get("cols").and_then(|c| c.parse().ok()).unwrap_or(80) },
+            rows: if remote { 24 } else { q.get("rows").and_then(|r| r.parse().ok()).unwrap_or(24) },
             cwd: q.get("cwd").cloned(),
             shell: q.get("shell").cloned(),
             target: q.get("target").cloned(),
@@ -4214,6 +4217,7 @@ async fn handle_conn(mut stream: TcpStream) {
             run_kind: "run".into(),
             attach_only: watch_only || q.get("attach").map(|v| v == "1").unwrap_or(false),
             watch_only,
+            remote,
         };
         handle_ws(ws, params).await;
         return;

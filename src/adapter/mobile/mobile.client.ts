@@ -1,9 +1,9 @@
 import type { MobileState, MobilePairing } from '~/domain/interfaces/mobile.interface';
 
-import { SIDECAR_HTTP } from '~/adapter/pty/sidecar.client';
+import { LOCAL_SIDECAR_HTTP } from '~/adapter/pty/sidecar.client';
 
 const request = async <T>(path: string, method = 'GET'): Promise<T> => {
-  const response = await fetch(`${SIDECAR_HTTP}/mobile/${path}`, { method });
+  const response = await fetch(`${LOCAL_SIDECAR_HTTP}/mobile/${path}`, { method });
   if (!response.ok) throw new Error(`mobile ${path} failed: ${response.status}`);
   return (await response.json()) as T;
 };

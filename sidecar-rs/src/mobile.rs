@@ -16,6 +16,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 mod wire;
+mod tunnel;
+pub(crate) mod desktop_tunnel;
 use wire::{Channel, session_key};
 #[cfg(test)]
 use wire::{nonce, DIR_CLIENT};
@@ -29,6 +31,7 @@ mod prompt;
 mod relay;
 #[allow(dead_code)]
 mod desktop_routes;
+pub(crate) use desktop_routes::pty_message_allowed as remote_pty_message_allowed;
 
 pub use prompt::{wait as wait_prompt, Wait as PromptWait};
 
@@ -1173,6 +1176,8 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
         device_id,
         ..Default::default()
     };
+    let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let mut mux = tunnel::Mux::new(stream_tx.clone());
     let mut tick = tokio::time::interval(FRAME_INTERVAL);
     loop {
         tokio::select! {
@@ -1184,15 +1189,24 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                     break;
                 }
             }
+            Some(plain) = stream_rx.recv() => {
+                if plain.first() == Some(&0) { if let Ok(v) = serde_json::from_slice::<Value>(&plain[1..]) { if v["op"] == "close" { if let Some(id) = v["id"].as_u64() { mux.remove(id); } } } }
+                if tx.send(Message::Binary(chan.seal(&plain))).await.is_err() { break; }
+            }
             msg = rx.next() => match msg {
                 Some(Ok(Message::Binary(sealed))) => {
                     if !device_active(&subs.device_id) { break; }
                     let Some(plain) = chan.open(&sealed) else {
                         break;
                     };
-                    let Some(req) = parse_json(&plain) else {
+                    if plain.first() == Some(&2) { if !mux.handle(&plain) { break; } continue; }
+                    let Some(req) = parse_json(&plain) else { continue; };
+                    if req["t"] == "stream" {
+                        if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) { break; }
+                        if req["op"] == "open" { desktop_tunnel::open(&req, &mut mux, &stream_tx).await; }
+                        else if !mux.handle(&plain) { break; }
                         continue;
-                    };
+                    }
                     let reply = reply_for(&req, &mut subs).await;
                     if !device_active(&subs.device_id) { break; }
                     if send_json(&mut tx, &mut chan, &reply).await.is_err() {

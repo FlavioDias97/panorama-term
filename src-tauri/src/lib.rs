@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub mod remote;
 mod service_bridge;
@@ -72,8 +72,31 @@ fn host_port() -> u16 {
     configured_port(std::env::var("PANORAMA_HOST_PORT").ok().as_deref(), HOST_PORT)
 }
 
+static REMOTE_PROXY: std::sync::Mutex<Option<remote::Proxy>> = std::sync::Mutex::new(None);
 #[tauri::command]
-fn sidecar_endpoint() -> u16 { sidecar_port() }
+fn sidecar_endpoint() -> String {
+    REMOTE_PROXY.lock().unwrap().as_ref().map(|p| p.endpoint.clone()).unwrap_or_else(|| format!("127.0.0.1:{}", sidecar_port()))
+}
+#[tauri::command]
+fn local_sidecar_endpoint() -> String { format!("127.0.0.1:{}", sidecar_port()) }
+#[tauri::command]
+async fn remote_pair(app: tauri::AppHandle, uri: String, name: String) -> Result<String, String> {
+    remote::pair(&uri, &name).await?;
+    remote_connect(app).await
+}
+#[tauri::command]
+async fn remote_connect(app: tauri::AppHandle) -> Result<String, String> {
+    let proxy = remote::start_proxy(&remote::Identity::load()?).await?;
+    let endpoint = proxy.endpoint.clone();
+    *REMOTE_PROXY.lock().unwrap() = Some(proxy);
+    let _ = app.emit("sidecar:endpoint", &endpoint);
+    Ok(endpoint)
+}
+#[tauri::command]
+fn remote_disconnect(app: tauri::AppHandle) {
+    *REMOTE_PROXY.lock().unwrap() = None;
+    let _ = app.emit("sidecar:endpoint", local_sidecar_endpoint());
+}
 const NOTIF_WIDTH: f64 = 448.0;
 // The overlay swallows clicks even on transparent pixels, so it must not cover the main
 // window's 24px status bar.
@@ -908,6 +931,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             sidecar_endpoint,
+            local_sidecar_endpoint,
+            remote_pair,
+            remote_connect,
+            remote_disconnect,
             write_temp_image,
             read_temp_image,
             has_clipboard_image,

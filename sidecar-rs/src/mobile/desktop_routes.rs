@@ -10,7 +10,7 @@ pub(super) fn allowed(method: &str, target: &str, websocket: bool) -> bool {
 }
 
 // Remote displays may send input, but the host owns the PTY dimensions.
-pub(super) fn pty_message_allowed(text: &str) -> bool {
+pub(crate) fn pty_message_allowed(text: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|message| message.get("t").and_then(|t| t.as_str()).map(str::to_owned))
