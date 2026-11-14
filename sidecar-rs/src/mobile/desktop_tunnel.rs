@@ -43,7 +43,7 @@ async fn serve(mut pipe: DuplexStream, method: &str, target: &str, ws: bool) {
     if pipe.write_all(format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").as_bytes()).await.is_err() { return; }
     let Ok(mut request) = format!("ws://127.0.0.1:{}{}", super::super::port(), target).into_client_request() else { return };
     request.headers_mut().insert("x-panorama-remote", secret().parse().unwrap());
-    let Ok((host, _)) = tokio_tungstenite::connect_async(request).await else { return };
+    let Ok((host, _)) = tokio_tungstenite::connect_async_with_config(request, None, true).await else { return };
     let browser = tokio_tungstenite::WebSocketStream::from_raw_socket(pipe, tokio_tungstenite::tungstenite::protocol::Role::Server, None).await;
     let (mut bt, mut br) = browser.split(); let (mut ht, mut hr) = host.split();
     loop { tokio::select! {

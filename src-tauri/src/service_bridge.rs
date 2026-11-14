@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tauri::Listener;
@@ -83,7 +84,7 @@ pub async fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
 }
 
 #[derive(Default)]
-pub struct Watches { git_files: Vec<u32>, repos: Vec<String>, files: Vec<u32>, runs: Vec<u32>, chunks: std::collections::HashMap<String, std::vec::IntoIter<u8>>, uploads: std::collections::HashMap<String, Vec<u8>>, next: u64 }
+pub struct Watches { git_files: Vec<u32>, repos: Vec<String>, files: Vec<u32>, runs: Vec<u32>, chunks: std::collections::HashMap<String, (Vec<u8>, usize)>, uploads: std::collections::HashMap<String, Vec<u8>>, next: u64 }
 impl Watches {
     async fn dispatch(&mut self, app: &tauri::AppHandle, command: &str, args: &Value) -> Option<Result<Value, String>> {
         if let Some(result) = self.data(command, args).await { return Some(result); }
@@ -115,7 +116,7 @@ impl Watches {
                         Ok((path, file, old, commit, base)) => crate::git::git_blob(path, file, old, commit, base).await.and_then(bytes), Err(e) => Err(e),
                     }
                 };
-                match result { Ok(data) => { self.next += 1; let token = self.next.to_string(); self.chunks.insert(token.clone(), data.into_iter()); Ok(self.chunk(&token)) }, Err(e) => Err(e) }
+                match result { Ok(data) => { self.next += 1; let token = self.next.to_string(); self.chunks.insert(token.clone(), (data, 0)); Ok(self.chunk(&token)) }, Err(e) => Err(e) }
             },
             "read_bytes_chunk" => match arg::<String>(args, "token") { Ok(token) if self.chunks.contains_key(&token) => Ok(self.chunk(&token)), _ => Err("Unknown byte stream".into()) },
             "upload_image_chunk" => (|| {
@@ -134,11 +135,13 @@ impl Watches {
         })
     }
     fn chunk(&mut self, token: &str) -> Value {
-        let iter = self.chunks.get_mut(token).unwrap();
-        let data: Vec<u8> = iter.by_ref().take(32768).collect();
-        let more = !iter.as_slice().is_empty();
+        let (data, offset) = self.chunks.get_mut(token).unwrap();
+        let end = (*offset + 256 * 1024).min(data.len());
+        let encoded = STANDARD.encode(&data[*offset..end]);
+        *offset = end;
+        let more = end < data.len();
         if !more { self.chunks.remove(token); }
-        json!({"bytes": data, "next": if more { Some(token) } else { None }})
+        json!({"bytes": encoded, "next": if more { Some(token) } else { None }})
     }
     async fn cleanup(self) {
         for id in self.git_files { crate::git::git_unwatch_file(id).await; }
@@ -160,7 +163,7 @@ pub fn start(app: tauri::AppHandle) {
                     if let Ok(mut request) = url.into_client_request() {
                         if let Ok(auth) = format!("Bearer {}", secret.trim()).parse() {
                             request.headers_mut().insert("authorization", auth);
-                            if let Ok((ws, _)) = tokio_tungstenite::connect_async(request).await {
+                            if let Ok((ws, _)) = tokio_tungstenite::connect_async_with_config(request, None, true).await {
                                 let (mut sink, mut stream) = ws.split();
                                 let (tx, mut rx) = tokio::sync::mpsc::channel::<Value>(64);
                                 let mut listeners = Vec::new();
@@ -214,21 +217,30 @@ mod tests {
     async fn chunked_bytes_and_image_upload() {
         let mut watches = Watches::default();
         let name = format!("test-paste-{}.png", std::process::id());
-        let data = vec![42u8; 40000];
-        let first = watches.data("upload_image_chunk", &json!({"name":name,"bytes": &data[..32768],"first":true,"last":false})).await.unwrap().unwrap();
-        assert!(first.is_null());
-        let path = watches.data("upload_image_chunk", &json!({"name":name,"bytes": &data[32768..],"first":false,"last":true})).await.unwrap().unwrap();
+        let data = vec![42u8; 270000];
+        let mut path = Value::Null;
+        let count = data.chunks(32768).len();
+        for (index, chunk) in data.chunks(32768).enumerate() {
+            path = watches.data("upload_image_chunk", &json!({"name":name,"bytes":chunk,"first":index == 0,"last":index + 1 == count})).await.unwrap().unwrap();
+        }
         let path = path.as_str().unwrap();
         let first = watches.data("read_temp_image", &json!({"path":path})).await.unwrap().unwrap();
-        assert_eq!(first["bytes"].as_array().unwrap().len(), 32768);
+        assert_eq!(STANDARD.decode(first["bytes"].as_str().unwrap()).unwrap(), data[..256 * 1024]);
         let token = first["next"].as_str().unwrap();
         let last = watches.data("read_bytes_chunk", &json!({"token":token})).await.unwrap().unwrap();
-        assert_eq!(last["bytes"].as_array().unwrap().len(), data.len() - 32768);
+        assert_eq!(STANDARD.decode(last["bytes"].as_str().unwrap()).unwrap(), data[256 * 1024..]);
         assert!(last["next"].is_null());
         assert!(watches.data("read_bytes_chunk", &json!({"token":token})).await.unwrap().is_err());
         assert!(watches.data("upload_image_chunk", &json!({"name":"../bad", "bytes":[], "first":true, "last":true})).await.unwrap().is_err());
         assert!(watches.data("read_temp_image", &json!({"path":format!("{path}/../other")})).await.unwrap().is_err());
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn empty_byte_stream_finishes_immediately() {
+        let mut watches = Watches::default();
+        watches.chunks.insert("empty".into(), (Vec::new(), 0));
+        assert_eq!(watches.chunk("empty"), json!({"bytes":"", "next":null}));
+        assert!(watches.chunks.is_empty());
     }
     #[tokio::test]
     async fn real_git_and_bytes() {

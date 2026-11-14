@@ -35,6 +35,7 @@ pub async fn start_proxy(identity: &Identity) -> Result<Proxy, String> {
     let accept_task = tokio::spawn(async move {
         let ids = Arc::new(AtomicU64::new(1));
         while let Ok((socket, _)) = listener.accept().await {
+            let _ = socket.set_nodelay(true);
             let tx = open_tx.clone(); let token = token.clone(); let id = ids.fetch_add(1, Ordering::Relaxed);
             tokio::spawn(async move { handle(socket, tx, &token, port, id).await; });
         }

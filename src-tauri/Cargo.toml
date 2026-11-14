@@ -45,3 +45,24 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Ole", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.dev.package.base64]
+opt-level = 3
+
+[profile.dev.package.crypto_secretbox]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.poly1305]
+opt-level = 3
+
+[profile.dev.package.serde_json]
+opt-level = 3
+
+[profile.dev.package.tungstenite]
+opt-level = 3
+
+[profile.dev.package.panorama]
+opt-level = 1

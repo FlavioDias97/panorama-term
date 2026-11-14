@@ -32,3 +32,24 @@ overflow-checks = false
 opt-level = "s"
 lto = true
 strip = true
+
+[profile.dev.package.base64]
+opt-level = 3
+
+[profile.dev.package.crypto_secretbox]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.poly1305]
+opt-level = 3
+
+[profile.dev.package.serde_json]
+opt-level = 3
+
+[profile.dev.package.tungstenite]
+opt-level = 3
+
+[profile.dev.package.sidecar]
+opt-level = 1

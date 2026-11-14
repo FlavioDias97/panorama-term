@@ -43,7 +43,7 @@ async fn remote_data_and_events_through_sidecar() {
     let secret = std::fs::read_to_string(secret_path).unwrap();
     let mut request = format!("ws://127.0.0.1:{port}/host-service").into_client_request().unwrap();
     request.headers_mut().insert("authorization", format!("Bearer {secret}").parse().unwrap());
-    let (mut provider, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let (mut provider, _) = tokio_tungstenite::connect_async_with_config(request, None, true).await.unwrap();
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Value>(1);
     let provider_task = tokio::spawn(async move {
         let mut watches = Watches::default();
@@ -67,7 +67,11 @@ async fn remote_data_and_events_through_sidecar() {
     let mut events = connect(&identity).await.unwrap(); events.subscribe().await.unwrap();
     let status = session.call("git_status", json!({"path":repo, "limit":null})).await.unwrap();
     assert!(status.to_string().contains("large.bin"), "{status}");
+    let start = std::time::Instant::now();
     assert_eq!(session.call_bytes("read_file_bytes", json!({"path":file})).await.unwrap(), expected);
+    let elapsed = start.elapsed();
+    eprintln!("read_file_bytes 3 MiB: {elapsed:?}");
+    assert!(elapsed < Duration::from_millis(1500), "file transfer: {elapsed:?}");
     assert_eq!(session.call_bytes("git_blob", json!({"path":repo, "file":"large.bin", "old":false, "commit":null, "base":null})).await.unwrap(), expected);
     event_tx.send(json!({"event":"git:repo","payload":{"root":"test"}})).await.unwrap();
     let event = tokio::time::timeout(Duration::from_secs(5), events.next_event()).await.unwrap().unwrap();

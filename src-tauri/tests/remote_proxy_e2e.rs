@@ -55,21 +55,34 @@ async fn terminal_proxy_routes_flow_and_resize() {
     assert!(!response.contains("Access-Control-Allow-Origin: *"));
     let (mut local, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{sidecar_port}/pty?tileId=proxy-test&cols=91&rows=31")).await.unwrap();
     wait_text(&mut local,"\"ready\"").await;
-    let (mut remote, _) = tokio_tungstenite::connect_async(format!("ws://{}/pty?tileId=proxy-test&cols=22&rows=12",proxy.endpoint)).await.unwrap();
+    let (mut remote, _) = tokio_tungstenite::connect_async_with_config(format!("ws://{}/pty?tileId=proxy-test&cols=22&rows=12",proxy.endpoint), None, true).await.unwrap();
     wait_text(&mut remote,"\"cols\":91").await;
     remote.send(Message::Text(json!({"t":"resize","cols":20,"rows":10}).to_string().into())).await.unwrap();
     remote.send(Message::Text(json!({"t":"in","d":"echo panorama-remote-ok; stty size\r"}).to_string().into())).await.unwrap();
     wait_output(&mut remote).await;
     wait_text(&mut local,"panorama-remote-ok").await;
-    let payload: Vec<u8> = (0..200*1024).map(|i| (i * 31 % 256) as u8).collect();
+    let command = format!(r#"python3 -c 'import sys,tty,termios; old=termios.tcgetattr(0); tty.setraw(0); print("LATENCY_"+"READY",flush=True); c=sys.stdin.read(1); print("LATENCY_"+"ECHO:"+c,flush=True); termios.tcsetattr(0,termios.TCSANOW,old)'{}"#, "\r");
+    remote.send(Message::Text(json!({"t":"in","d":command}).to_string().into())).await.unwrap();
+    wait_text(&mut remote,"LATENCY_READY").await;
+    let start = std::time::Instant::now();
+    remote.send(Message::Text(json!({"t":"in","d":"Z"}).to_string().into())).await.unwrap();
+    wait_text(&mut remote,"LATENCY_ECHO:Z").await;
+    let latency = start.elapsed();
+    eprintln!("terminal key echo: {latency:?}");
+    assert!(latency < Duration::from_millis(30), "terminal key echo: {latency:?}");
+    let payload: Vec<u8> = (0..3*1024*1024).map(|i| (i * 31 % 256) as u8).collect();
     let path = dir.join("payload.bin");
     remote.send(Message::Text(json!({"t":"in","d":"stty -echo\r"}).to_string().into())).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let command = format!(r#"python3 -c 'import sys,tty,termios; old=termios.tcgetattr(0); tty.setraw(0); print("PAYLOAD_READY",flush=True); open("{}","wb").write(sys.stdin.buffer.read(204800)); termios.tcsetattr(0,termios.TCSANOW,old); print("PAYLOAD_DONE",flush=True)'{}"#, path.display(), "\r");
+    let command = format!(r#"python3 -c 'import sys,tty,termios; old=termios.tcgetattr(0); tty.setraw(0); print("PAYLOAD_READY",flush=True); open("{}","wb").write(sys.stdin.buffer.read(3145728)); termios.tcsetattr(0,termios.TCSANOW,old); print("PAYLOAD_DONE",flush=True)'{}"#, path.display(), "\r");
     remote.send(Message::Text(json!({"t":"in","d":command}).to_string().into())).await.unwrap();
     wait_text(&mut remote,"PAYLOAD_READY").await;
+    let start = std::time::Instant::now();
     remote.send(Message::Binary(payload.clone().into())).await.unwrap();
     wait_text(&mut remote,"PAYLOAD_DONE").await;
+    let elapsed = start.elapsed();
+    eprintln!("terminal 3 MiB: {elapsed:?}");
+    assert!(elapsed < Duration::from_millis(1500), "terminal transfer: {elapsed:?}");
     assert_eq!(std::fs::read(&path).unwrap(), payload);
 
 }

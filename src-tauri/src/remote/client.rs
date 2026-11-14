@@ -80,7 +80,7 @@ pub(super) async fn handshake(identity: &Identity, intro: Value) -> Result<(Sock
     let mut last = "Host unavailable".to_string();
     for address in &identity.addresses {
         let attempt = async {
-            let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}")).await.map_err(|e| e.to_string())?;
+            let (mut ws, _) = tokio_tungstenite::connect_async_with_config(format!("ws://{address}"), None, true).await.map_err(|e| e.to_string())?;
             ws.send(Message::Text(json!({"t":"hello","pk":STANDARD.encode(public),"n":STANDARD.encode(client_nonce)}).to_string().into())).await.map_err(|e| e.to_string())?;
             let hello = match ws.next().await { Some(Ok(Message::Text(s))) => serde_json::from_str::<Value>(&s).map_err(|e| e.to_string())?, _ => return Err("Invalid host hello".into()) };
             if hello["t"] != "hello" || hello["v"] != 1 || fixed::<32>(hello["pk"].as_str().unwrap_or(""))? != identity.host_key { return Err("Host key or protocol mismatch".into()); }
@@ -134,7 +134,7 @@ impl Session {
         let mut result = self.call(command, args).await?;
         let mut bytes = Vec::new();
         loop {
-            let chunk: Vec<u8> = serde_json::from_value(result["bytes"].clone()).map_err(|e| e.to_string())?;
+            let chunk = STANDARD.decode(result["bytes"].as_str().ok_or("Invalid byte chunk")?).map_err(|e| e.to_string())?;
             bytes.extend(chunk);
             match result["next"].as_str() {
                 Some(token) => result = self.call("read_bytes_chunk", json!({"token":token})).await?,
