@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
 
+pub mod remote;
 mod service_bridge;
 mod git;
 mod store;

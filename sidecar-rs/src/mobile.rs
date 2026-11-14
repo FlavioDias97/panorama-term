@@ -8,15 +8,21 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use crypto_secretbox::aead::{Aead, KeyInit};
-use crypto_secretbox::{Nonce, XSalsa20Poly1305};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha512};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use x25519_dalek::{PublicKey, StaticSecret};
+
+mod wire;
+use wire::{Channel, session_key};
+#[cfg(test)]
+use wire::{nonce, DIR_CLIENT};
+#[cfg(test)]
+use crypto_secretbox::{XSalsa20Poly1305, aead::{Aead, KeyInit}};
+#[cfg(test)]
+use sha2::{Digest, Sha512};
 
 mod presence;
 mod prompt;
@@ -41,8 +47,6 @@ const SNIPPET_ROWS: usize = 60;
 const MAX_MESSAGE: usize = 1 << 20;
 const KIND_JSON: u8 = 0;
 const KIND_FRAME: u8 = 1;
-const DIR_CLIENT: u8 = 0;
-const DIR_SERVER: u8 = 1;
 const PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 const PUSH_CHANNEL: &str = "agent";
 const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -405,66 +409,6 @@ pub fn cors_origin(origin: Option<&str>) -> &str {
     origin.filter(|o| LOCAL_ORIGINS.contains(o)).unwrap_or("null")
 }
 
-struct Channel {
-    cipher: XSalsa20Poly1305,
-    send_ctr: u64,
-    recv_ctr: u64,
-}
-
-fn nonce(dir: u8, ctr: u64) -> Nonce {
-    let mut n = [0u8; 24];
-    n[0] = dir;
-    n[1..9].copy_from_slice(&ctr.to_le_bytes());
-    Nonce::from(n)
-}
-
-impl Channel {
-    fn new(key: &[u8; 32]) -> Self {
-        Self {
-            cipher: XSalsa20Poly1305::new(key.into()),
-            send_ctr: 0,
-            recv_ctr: 0,
-        }
-    }
-
-    fn seal(&mut self, plain: &[u8]) -> Vec<u8> {
-        let sealed = self
-            .cipher
-            .encrypt(&nonce(DIR_SERVER, self.send_ctr), plain)
-            .expect("secretbox encrypt");
-        self.send_ctr += 1;
-        sealed
-    }
-
-    fn open(&mut self, sealed: &[u8]) -> Option<Vec<u8>> {
-        let plain = self.cipher.decrypt(&nonce(DIR_CLIENT, self.recv_ctr), sealed).ok()?;
-        self.recv_ctr += 1;
-        Some(plain)
-    }
-}
-
-fn session_key(
-    secret: &StaticSecret,
-    client_pk: &[u8; 32],
-    client_nonce: &[u8; 24],
-    server_nonce: &[u8; 24],
-) -> Option<[u8; 32]> {
-    let shared = secret.diffie_hellman(&PublicKey::from(*client_pk));
-    if !shared.was_contributory() {
-        return None;
-    }
-    let mut h = Sha512::new();
-    h.update(shared.as_bytes());
-    h.update(client_pk);
-    h.update(PublicKey::from(secret).as_bytes());
-    h.update(client_nonce);
-    h.update(server_nonce);
-    let digest = h.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&digest[..32]);
-    Some(key)
-}
-
 fn parse_json(plain: &[u8]) -> Option<Value> {
     let (&kind, body) = plain.split_first()?;
     if kind != KIND_JSON {
@@ -567,8 +511,8 @@ async fn handshake(tx: &mut Tx, rx: &mut Rx) -> Option<(Channel, String)> {
     });
     tx.send(Message::Text(reply.to_string())).await.ok()?;
 
-    let key = session_key(&secret, &client_pk, &client_nonce, &server_nonce)?;
-    let mut chan = Channel::new(&key);
+    let key = session_key(&secret, &client_pk, &client_pk, &server_pk, &client_nonce, &server_nonce)?;
+    let mut chan = Channel::server(&key);
     let Message::Binary(first) = next_data(rx).await? else {
         return None;
     };
@@ -1043,6 +987,12 @@ fn stop_run(tile_id: &str, kind: &str) {
 async fn dispatch(method: &str, p: &Value, subs: &mut Subs) -> Result<Value, String> {
     match method {
         "ping" => Ok(json!({})),
+        "host.call" => {
+            if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
+                return Err("Desktop capability required".into());
+            }
+            crate::service_bridge::call(str_param(p, "command")?, p.get("args").cloned().unwrap_or(Value::Null)).await
+        },
         "desktop.store_read" => {
             if !state().devices.iter().any(|d| d.id == subs.device_id && d.desktop) {
                 return Err("Desktop capability required".into());
@@ -1244,6 +1194,7 @@ async fn serve(mut tx: Tx, mut rx: Rx, mut chan: Channel, device_id: String) {
                         continue;
                     };
                     let reply = reply_for(&req, &mut subs).await;
+                    if !device_active(&subs.device_id) { break; }
                     if send_json(&mut tx, &mut chan, &reply).await.is_err() {
                         break;
                     }
@@ -1282,7 +1233,7 @@ mod tests {
     #[test]
     fn channel_round_trips_and_rejects_replay() {
         let key = [7u8; 32];
-        let mut server = Channel::new(&key);
+        let mut server = Channel::server(&key);
         let client = XSalsa20Poly1305::new((&key).into());
         let sealed = client.encrypt(&nonce(DIR_CLIENT, 0), b"\x00{}".as_slice()).unwrap();
         assert_eq!(server.open(&sealed).as_deref(), Some(b"\x00{}".as_slice()));
@@ -1295,7 +1246,7 @@ mod tests {
         let client = StaticSecret::from([2u8; 32]);
         let client_pk = PublicKey::from(&client).to_bytes();
         let (cn, sn) = ([3u8; 24], [4u8; 24]);
-        let key = session_key(&server, &client_pk, &cn, &sn).unwrap();
+        let key = session_key(&server, &client_pk, &client_pk, PublicKey::from(&server).as_bytes(), &cn, &sn).unwrap();
         let shared = client.diffie_hellman(&PublicKey::from(&server));
         let mut h = Sha512::new();
         h.update(shared.as_bytes());
@@ -1308,7 +1259,7 @@ mod tests {
 
     #[test]
     fn rejects_low_order_client_key() {
-        assert!(session_key(&StaticSecret::from([1u8; 32]), &[0u8; 32], &[0; 24], &[0; 24]).is_none());
+        assert!(session_key(&StaticSecret::from([1u8; 32]), &[0u8; 32], &[0u8; 32], &[1u8; 32], &[0; 24], &[0; 24]).is_none());
     }
 
     #[test]
