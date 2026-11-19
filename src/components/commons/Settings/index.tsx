@@ -33,6 +33,8 @@ import {
   NOTIF_CORNERS,
   getNotifPlacement,
   setNotifPlacement,
+  getNotifToasts,
+  setNotifToasts,
   type NotifCorner,
   type MonitorInfo
 } from '~/usecase/util/notifPlacement';
@@ -217,6 +219,7 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
   const [minimapCorner, setCorner] = React.useState(getMinimapCorner);
   const [monitors, setMonitors] = React.useState<MonitorInfo[]>([]);
   const [placement, setPlacement] = React.useState(getNotifPlacement);
+  const [toasts, setToasts] = React.useState(getNotifToasts);
   const [providers] = React.useState(getSeenProviders);
   const [hiddenProviders, setHiddenProviders] = React.useState(getHiddenProviders);
   const { plugins } = usePlugins();
@@ -279,6 +282,11 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
   const selectMinimapCorner = (corner: MinimapCorner) => {
     setCorner(corner);
     setMinimapCorner(corner);
+  };
+
+  const toggleToasts = () => {
+    setToasts(!toasts);
+    setNotifToasts(!toasts);
   };
 
   const selectCorner = (corner: NotifCorner) => {
@@ -392,6 +400,17 @@ const Settings = ({ initialSection = 'general', onClose }: SettingsProps) => {
                       <span className={styles.optionLabel}>{label}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+              <div className={styles.group}>
+                <p className={styles.groupLabel}>Notifications</p>
+                <div className={styles.options}>
+                  <ToggleOption
+                    checked={toasts}
+                    label="Show notifications"
+                    onToggle={toggleToasts}
+                    description="Pop up a toast when an agent finishes or needs your attention. Tile badges stay either way."
+                  />
                 </div>
               </div>
               <div className={styles.group}>
