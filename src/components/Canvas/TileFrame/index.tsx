@@ -31,6 +31,7 @@ import { hasHistory, resumeCommand } from '~/usecase/util/agentHistory';
 import { reportAgent } from '~/usecase/util/tileActivity';
 import type { TerminalRestart } from '~/domain/interfaces/pty.interface';
 import GridTerminal from '~/components/Terminal/GridTerminal';
+import TasksTile from '~/components/Canvas/TasksTile';
 import { useRun } from '~/usecase/hooks/useRun';
 import { stopRun } from '~/adapter/run/run.client';
 import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
@@ -176,7 +177,7 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
   const spinning = !tile.userTitle && agentBusy && hasSpinnerPrefix(oscTitle);
   const label = tile.runCwd
     ? tile.userTitle || tile.autoTitle || 'run'
-    : tile.type === 'orch'
+    : tile.type === 'orch' || tile.type === 'tasks'
     ? tileLabel(tile)
     : tile.userTitle
       || (agentType && oscTitle && (spinning ? oscTitle : stripSpinner(oscTitle)))
@@ -603,6 +604,7 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
   }
 
   const orch = tile.type === 'orch';
+  const tasks = tile.type === 'tasks';
   const boardProject = orch ? null : boards.projectOf(tile.id);
   const activeBoards = boardProject?.kind === 'project' ? projectBoards(boards.allRuns, boardProject.repo) : [];
 
@@ -626,6 +628,8 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
 
   const menuItems: ContextMenuEntry[] = note
     ? noteMenuItems
+    : tasks
+    ? [pinItem, fullscreenItem, 'separator', closeItem]
     : runView
     ? runViewMenuItems
     : [
@@ -891,7 +895,7 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
                 <History size={13} strokeWidth={2} />
               </button>
             )}
-            {!note && !runView && !fullscreen && parts.link && (
+            {!note && !tasks && !runView && !fullscreen && parts.link && (
               <button
                 className={linkedTerms.length ? `${styles.action} ${styles.linked}` : styles.action}
                 onPointerDown={startLinkDrag}
@@ -908,7 +912,7 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
                 {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
               </button>
             )}
-            {!note && !code && !editor && !runView && parts.restart && (
+            {!note && !code && !editor && !tasks && !runView && parts.restart && (
               <button
                 className={styles.action}
                 onClick={restartTile}
@@ -977,7 +981,8 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
                 onPatchOrchTile={(patch) => onPatchOrchTile(tile.id, patch)}
               />
             )}
-            {!note && !code && !editor && !term && tile.type !== 'orch' && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>}
+            {tasks && <TasksTile sourceId={tile.taskSource ?? ''} />}
+            {!note && !code && !editor && !term && !tasks && tile.type !== 'orch' && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>}
           </ErrorBoundary>
         </div>
       </div>
