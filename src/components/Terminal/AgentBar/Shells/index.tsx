@@ -10,11 +10,13 @@ import styles from './styles.module.scss';
 interface ShellsProps {
   open: boolean;
   shells: BackgroundShell[];
+  // Shown as a card beside the tile instead of collapsing inside the agent bar.
+  docked?: boolean;
 }
 
 const STICK_PX = 8;
 
-const Shells = ({ open, shells }: ShellsProps) => {
+const Shells = ({ open, shells, docked }: ShellsProps) => {
   const [now, setNow] = React.useState(Date.now);
   const [pickedId, setPickedId] = React.useState('');
   const outRef = React.useRef<HTMLPreElement>(null);
@@ -45,30 +47,34 @@ const Shells = ({ open, shells }: ShellsProps) => {
     setPickedId(id);
   };
 
+  const panel = (
+    <div className={styles.panel} aria-label="Background shells" data-shells>
+      {shells.map((shell) => (
+        <button
+          type="button"
+          key={shell.id}
+          className={styles.row}
+          onClick={pick(shell.id)}
+          aria-pressed={shell.id === selected?.id}
+          title={shell.description ?? shell.command}
+        >
+          <span className={styles.dot} />
+          <span className={styles.command}>{shell.command}</span>
+          <span className={styles.elapsed}>{formatElapsed(now - shell.startedAt)}</span>
+        </button>
+      ))}
+      <pre ref={outRef} className={styles.output} onScroll={handleScroll}>
+        {selected?.outputFile ? error ?? text : 'Output file unknown for this shell.'}
+      </pre>
+      {selected?.outputFile && <div className={styles.path}>{selected.outputFile}</div>}
+    </div>
+  );
+
+  if (docked) return <div className={styles.docked}>{panel}</div>;
+
   return (
     <div className={styles.collapse} data-open={open} inert={!open}>
-      <div className={styles.inner}>
-        <div className={styles.panel} aria-label="Background shells" data-shells>
-          {shells.map((shell) => (
-            <button
-              type="button"
-              key={shell.id}
-              className={styles.row}
-              onClick={pick(shell.id)}
-              aria-pressed={shell.id === selected?.id}
-              title={shell.description ?? shell.command}
-            >
-              <span className={styles.dot} />
-              <span className={styles.command}>{shell.command}</span>
-              <span className={styles.elapsed}>{formatElapsed(now - shell.startedAt)}</span>
-            </button>
-          ))}
-          <pre ref={outRef} className={styles.output} onScroll={handleScroll}>
-            {selected?.outputFile ? error ?? text : 'Output file unknown for this shell.'}
-          </pre>
-          {selected?.outputFile && <div className={styles.path}>{selected.outputFile}</div>}
-        </div>
-      </div>
+      <div className={styles.inner}>{panel}</div>
     </div>
   );
 };

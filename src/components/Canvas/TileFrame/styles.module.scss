@@ -561,3 +561,13 @@
     cursor: nesw-resize;
   }
 }
+
+// Panels docked beside a tile (e.g. background shells). Empty, so it never blocks the canvas.
+.side {
+  position: absolute;
+  pointer-events: none;
+
+  > * {
+    pointer-events: auto;
+  }
+}

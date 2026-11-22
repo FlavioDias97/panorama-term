@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Brain, Sparkles, ChevronDown } from 'lucide-react';
 
 import Shells from './Shells';
@@ -10,6 +11,7 @@ import PiActions from './PiActions';
 import Magnifier from './Magnifier';
 import OrchToggle from './OrchToggle';
 import ClaudeLogo from '~/components/commons/ClaudeLogo';
+import { useTileSide } from '~/usecase/context/TileSideContext';
 import { getPref, setPref, removePref } from '~/usecase/util/prefs';
 import { subscribePromptRestore } from '~/usecase/util/promptRestore';
 import { KimiLogo, PiLogo, CodexLogo, OpenCodeLogo, AntigravityLogo, GenericAgentLogo } from '~/components/commons/AgentIcons';
@@ -118,6 +120,7 @@ const AgentBar = ({ tileId, cwd, sessionId, active, send, getLines, getFrame, ge
   const [modelMenu, setModelMenu] = React.useState(false);
   const [effortMenu, setEffortMenu] = React.useState(false);
   const [shellsOpen, setShellsOpen] = React.useState(false);
+  const side = useTileSide();
   const [preview, setPreview] = React.useState<string | null>(null);
   const [spentSuggestion, setSpentSuggestion] = React.useState('');
   const [inputTop, setInputTop] = React.useState<number | null>(null);
@@ -1314,7 +1317,8 @@ const AgentBar = ({ tileId, cwd, sessionId, active, send, getLines, getFrame, ge
                     : 'Enter send - Shift+Enter newline - Tab terminal'}
             </div>
             {(subagents.length > 0 || viewing) && <Subagents agents={subagents} viewing={viewing} onView={viewSubagent} />}
-            {shells.length > 0 && <Shells open={shellsOpen} shells={shells} />}
+            {shells.length > 0 &&
+              (side ? shellsOpen && createPortal(<Shells docked open shells={shells} />, side) : <Shells open={shellsOpen} shells={shells} />)}
             {hasStatus && (
               <div className={styles.footer}>
                 {parsed.mode && (

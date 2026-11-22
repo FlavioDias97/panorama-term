@@ -112,3 +112,29 @@
     opacity: 0.35;
   }
 }
+
+// Card beside the tile, joined to it by a short line across the gap.
+.docked {
+  position: relative;
+  width: 360px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--surface-1) var(--tile-alpha), transparent);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-tile);
+  backdrop-filter: blur(var(--tile-blur));
+
+  &::before {
+    position: absolute;
+    top: 14px;
+    left: -25px; // TILE_SIDE_GAP plus this card's border
+    width: 24px;
+    content: '';
+    border-top: 1px dashed color-mix(in srgb, #e0844a 70%, transparent);
+  }
+
+  .panel {
+    margin-top: 0;
+    border-top: none;
+  }
+}

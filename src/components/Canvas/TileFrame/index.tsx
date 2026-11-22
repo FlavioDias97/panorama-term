@@ -45,6 +45,8 @@ import { tileLabel, stripSpinner, stripStarPrefix, hasSpinnerPrefix } from '~/us
 import { projectBoards } from '~/usecase/util/boardProject';
 import { boardSubmenu } from '~/components/commons/ContextMenu/boardSubmenu';
 import { TILE_GAP } from '~/usecase/util/constants';
+import { tileSideOrigin } from '~/usecase/util/tileSide';
+import { TileSideProvider } from '~/usecase/context/TileSideContext';
 import { termGridOf } from '~/usecase/util/termGrid';
 import { getBinding, formatCombo } from '~/usecase/util/keybindings';
 
@@ -151,6 +153,7 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
   };
 
   const [restart, setRestart] = React.useState<TerminalRestart>({ key: 0 });
+  const [side, setSide] = React.useState<HTMLDivElement | null>(null);
   const [restarting, setRestarting] = React.useState(false);
   const [elevated, setElevated] = React.useState(false);
   const restartWith = (command?: string) => {
@@ -949,25 +952,27 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
             {code && tile.cwd && tile.filePath && <DiffViewer root={tile.cwd} file={tile.filePath} mode={EMBED} />}
             {editor && tile.filePath && <EditorTile tile={tile} active={active} onActivate={onActivate} />}
             {term && (
-              <GridTerminal
-                sessionId={tile.ptySessionId}
-                readOnly={runView}
-                cwd={runView ? tile.runCwd : tile.cwd}
-                onCwd={onCwd}
-                onOscTitle={onOscTitle}
-                onAgentActive={setAgentType}
-                onClaudeStatus={onClaudeStatus}
-                onClaudeDiff={onClaudeDiff}
-                onProgress={onProgress}
-                restart={restart}
-                elevated={elevated}
-                active={active}
-                visible={visible && !hidden}
-                tileId={tile.id}
-                cols={termCols}
-                rows={termRows}
-                onContextMenu={openMenu}
-              />
+              <TileSideProvider value={fullscreen ? null : side}>
+                <GridTerminal
+                  sessionId={tile.ptySessionId}
+                  readOnly={runView}
+                  cwd={runView ? tile.runCwd : tile.cwd}
+                  onCwd={onCwd}
+                  onOscTitle={onOscTitle}
+                  onAgentActive={setAgentType}
+                  onClaudeStatus={onClaudeStatus}
+                  onClaudeDiff={onClaudeDiff}
+                  onProgress={onProgress}
+                  restart={restart}
+                  elevated={elevated}
+                  active={active}
+                  visible={visible && !hidden}
+                  tileId={tile.id}
+                  cols={termCols}
+                  rows={termRows}
+                  onContextMenu={openMenu}
+                />
+              </TileSideProvider>
             )}
             {tile.type === 'orch' && (
               <OrchBoard
@@ -988,6 +993,14 @@ const TileFrame = ({ tile, view, status, link }: TileFrameProps) => {
           actions={tabActions}
           style={tabsStyle}
           tabs={sections.map((s) => ({ name: s.name, empty: !s.text.trim() }))}
+        />
+      )}
+      {term && !fullscreen && (
+        <div
+          ref={setSide}
+          data-tile={tile.id}
+          className={styles.side}
+          style={{ ...tileSideOrigin(sx, sy, bodyW, k), zIndex: z, transform: `scale(${k})`, transformOrigin: 'top left', ...gone }}
         />
       )}
       {!fullscreen && (
