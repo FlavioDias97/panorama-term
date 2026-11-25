@@ -37,6 +37,24 @@ export const shouldPersist = (
   remote = true
 ): boolean => !remote || applied.tiles !== current.tiles || applied.frames !== current.frames;
 
+// Skips writes that would store what is already stored: with a remote client both sides reload each other's
+// writes, and an unchanged state written back would bounce between them forever.
+export const createSaveGate = () => {
+  let last: string | undefined;
+  return {
+    applied: (state: unknown): void => {
+      last = JSON.stringify(state);
+    },
+    // True, and remembered as stored, when `state` differs from what was last written or applied.
+    shouldWrite: (state: unknown): boolean => {
+      const json = JSON.stringify(state);
+      if (json === last) return false;
+      last = json;
+      return true;
+    }
+  };
+};
+
 export const listenPointerInteraction = (target: Window, start: (event: PointerEvent) => void, end: () => void): (() => void) => {
   target.addEventListener('pointerdown', start, true);
   target.addEventListener('pointerup', end, true);
