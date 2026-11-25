@@ -27,7 +27,7 @@ import { settleRect, settleOffset, computeDragSnap, computeResizeSnap } from '~/
 import { termName, noteLinkTitle } from '~/usecase/util/noteLink';
 import { NOTE_DEFAULT_COLOR } from '~/usecase/util/note';
 import { toStored, toRuntime, type RuntimeCanvas } from '~/usecase/util/workspaceCanvas';
-import { shouldPersist, listenPointerInteraction } from '~/usecase/util/storeSync';
+import { shouldPersist, createSaveGate, listenPointerInteraction } from '~/usecase/util/storeSync';
 import { planFrameReorder, planCanvasCluster, planCanvasReorder } from '~/usecase/util/reorderLayout';
 import { currentLayoutSpacing } from '~/usecase/util/reorderSetting';
 import { moveProject, moveFrameOrder } from '~/usecase/util/projectOrder';
@@ -194,12 +194,23 @@ export const useCanvas = ({ seed, wsId, tabId, onPersist }: UseCanvasArgs) => {
   useFrameLinks({ scope: `${wsId}/${tabId}`, wsId, tiles, frames, paused: interacting });
 
   const applied = React.useRef({ tiles, frames });
+  const saveGate = React.useRef(createSaveGate()).current;
+  const seedScope = React.useRef('');
   React.useEffect(() => {
     if (!seed) return;
+    const scope = `${wsId}/${tabId}`;
+    // A reload from another client carries the stored state, without the edit still waiting to be saved here
+    // (a tile just closed): keep the edit and save it instead of losing it.
+    if (pendingSaveRef.current && seedScope.current === scope) {
+      persistNowRef.current();
+      return;
+    }
+    seedScope.current = scope;
     const next = toRuntime(seed);
     history.rebase(next);
     applied.current = { tiles: next.tiles, frames: next.frames };
     initial.current = { ...initial.current, projectView: next.projectView };
+    saveGate.applied(storedOf(next.tiles, next.frames));
     setTiles(next.tiles);
     setFrames(next.frames);
   }, [seed]);
@@ -227,14 +238,19 @@ export const useCanvas = ({ seed, wsId, tabId, onPersist }: UseCanvasArgs) => {
   onPersistRef.current = onPersist;
   const pendingSaveRef = React.useRef(false);
 
+  function storedOf(tilesNow: Tile[], framesNow: Frame[]) {
+    const projectView = initial.current.projectView && {
+      ...initial.current.projectView,
+      projects: projectsInUse({ frames: framesNow, tiles: tilesNow, projects: initial.current.projectView.projects })
+    };
+    return toStored({ tiles: tilesNow, view: viewRef.current, frames: framesNow, projectView });
+  }
+
   const persistNow = () => {
     pendingSaveRef.current = false;
     applied.current = { tiles: tilesRef.current, frames: framesRef.current };
-    const projectView = initial.current.projectView && {
-      ...initial.current.projectView,
-      projects: projectsInUse({ frames: framesRef.current, tiles: tilesRef.current, projects: initial.current.projectView.projects })
-    };
-    onPersistRef.current(toStored({ tiles: tilesRef.current, view: viewRef.current, frames: framesRef.current, projectView }));
+    const stored = storedOf(tilesRef.current, framesRef.current);
+    if (saveGate.shouldWrite(stored)) onPersistRef.current(stored);
   };
   const persistNowRef = React.useRef(persistNow);
   persistNowRef.current = persistNow;

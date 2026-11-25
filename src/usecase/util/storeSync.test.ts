@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createDeferredReload, shouldReload, shouldPersist, listenPointerInteraction } from './storeSync';
+import { createDeferredReload, createSaveGate, shouldReload, shouldPersist, listenPointerInteraction } from './storeSync';
 
 test('only changes from another screen affecting workspaces trigger reload', () => {
   expect(shouldReload({ name: 'workspaces/a.json', revision: 1, origin: 'other' }, 'self')).toBe(true);
@@ -46,4 +46,14 @@ test('pointer listeners end interactions and are removed together', () => {
   stop();
   target.dispatchEvent(new Event('pointerdown'));
   expect(calls).toEqual(['start', 'end', 'end']);
+});
+
+test('a state equal to the stored one is not written again', () => {
+  const gate = createSaveGate();
+  gate.applied({ tiles: [{ id: 'a' }] });
+  expect(gate.shouldWrite({ tiles: [{ id: 'a' }] })).toBe(false);
+  expect(gate.shouldWrite({ tiles: [] })).toBe(true);
+  expect(gate.shouldWrite({ tiles: [] })).toBe(false);
+  gate.applied({ tiles: [{ id: 'b' }] });
+  expect(gate.shouldWrite({ tiles: [] })).toBe(true);
 });
